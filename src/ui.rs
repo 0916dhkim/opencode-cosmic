@@ -859,6 +859,7 @@ impl Application for OpenCodeCosmic {
                         };
                     }
                     if is_active || hovered {
+                        // GTK rounded every session row (`border-radius: 0.5em`).
                         container::Style {
                             background: Some(
                                 if is_active {
@@ -868,6 +869,10 @@ impl Application for OpenCodeCosmic {
                                 }
                                 .into(),
                             ),
+                            border: Border {
+                                radius: radius.into(),
+                                ..Default::default()
+                            },
                             ..Default::default()
                         }
                     } else {
