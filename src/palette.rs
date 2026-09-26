@@ -160,6 +160,45 @@ pub struct Palette {
     pub overlay_border: Color,
     /// Translucent tool-badge fill (`alpha(#ffffff, 0.05)` in dark).
     pub badge_overlay_bg: Color,
+    /// `@oc_fg_window` — the header title, composer menu labels and error body.
+    pub window_fg: Color,
+    /// `@oc_bg_headerbar`
+    pub headerbar_bg: Color,
+    /// `@oc_border_headerbar`
+    pub headerbar_border: Color,
+    /// `@oc_bg_headerbar_button_sidebar_toggle_hover`
+    pub headerbar_toggle_hover: Color,
+    /// `@oc_fg_connection_status`
+    pub connection_status: Color,
+    /// `@oc_fg_connection_status_error`
+    pub connection_status_error: Color,
+    /// The header's own glyphs: GTK drew them in Adwaita's `@theme_fg_color`
+    /// (`#2e3436` light, white at 80% dark).
+    pub header_icon: Color,
+    /// `@oc_fg_sidebar_new_session` — sidebar labels and the dimmed row actions.
+    pub sidebar_label: Color,
+    /// `@oc_fg_background_jobs_heading`
+    pub jobs_heading: Color,
+    /// `@oc_bg_background_jobs_count`
+    pub jobs_count_bg: Color,
+    /// `@oc_fg_background_jobs_count`
+    pub jobs_count_fg: Color,
+    /// `@oc_bg_background_job_icon_subagent`
+    pub job_subagent_bg: Color,
+    /// `@oc_fg_background_job_icon_subagent`
+    pub job_subagent_fg: Color,
+    /// `@oc_bg_background_job_icon_shell`
+    pub job_shell_bg: Color,
+    /// `@oc_fg_background_job_icon_shell`
+    pub job_shell_fg: Color,
+    /// `@oc_fg_background_job_title`
+    pub job_title: Color,
+    /// `@oc_fg_background_job_meta`
+    pub job_meta: Color,
+    /// `@oc_shadow_session_tab_drag_preview`
+    pub drag_preview_shadow: Color,
+    /// `@oc_border_user_message`
+    pub user_message_border: Color,
 }
 
 pub const LIGHT: Palette = Palette {
@@ -236,6 +275,25 @@ pub const LIGHT: Palette = Palette {
     overlay_bg: Color::from_rgba8(0x00, 0x00, 0x00, 0.02),
     overlay_border: Color::from_rgba8(0x00, 0x00, 0x00, 0.04),
     badge_overlay_bg: Color::from_rgba8(0x00, 0x00, 0x00, 0.05),
+    window_fg: Color::from_rgb8(0x28, 0x26, 0x23),
+    headerbar_bg: Color::from_rgb8(0xee, 0xec, 0xe7),
+    headerbar_border: Color::from_rgb8(0xd3, 0xcf, 0xc7),
+    headerbar_toggle_hover: Color::from_rgb8(0xe4, 0xe0, 0xd8),
+    connection_status: Color::from_rgb8(0x6d, 0x71, 0x6f),
+    connection_status_error: Color::from_rgb8(0xa1, 0x3c, 0x34),
+    header_icon: Color::from_rgb8(0x2e, 0x34, 0x36),
+    sidebar_label: Color::from_rgb8(0x66, 0x6b, 0x69),
+    jobs_heading: Color::from_rgb8(0x70, 0x76, 0x73),
+    jobs_count_bg: Color::from_rgb8(0xe4, 0xdd, 0xd0),
+    jobs_count_fg: Color::from_rgb8(0x5c, 0x4a, 0x2e),
+    job_subagent_bg: Color::from_rgb8(0xf3, 0xe7, 0xcf),
+    job_subagent_fg: Color::from_rgb8(0x9c, 0x64, 0x1a),
+    job_shell_bg: Color::from_rgb8(0xe3, 0xe8, 0xe5),
+    job_shell_fg: Color::from_rgb8(0x3f, 0x5a, 0x4c),
+    job_title: Color::from_rgb8(0x2f, 0x2d, 0x29),
+    job_meta: Color::from_rgb8(0x8b, 0x91, 0x8e),
+    drag_preview_shadow: Color::from_rgba(40.0 / 255.0, 38.0 / 255.0, 35.0 / 255.0, 0.22),
+    user_message_border: Color::from_rgb8(0xcf, 0xc6, 0xb6),
 };
 
 pub const DARK: Palette = Palette {
@@ -312,6 +370,25 @@ pub const DARK: Palette = Palette {
     overlay_bg: Color::from_rgba8(0xff, 0xff, 0xff, 0.02),
     overlay_border: Color::from_rgba8(0xff, 0xff, 0xff, 0.04),
     badge_overlay_bg: Color::from_rgba8(0xff, 0xff, 0xff, 0.05),
+    window_fg: Color::from_rgb8(0xe8, 0xe5, 0xdf),
+    headerbar_bg: Color::from_rgb8(0x14, 0x17, 0x1a),
+    headerbar_border: Color::from_rgb8(0x2a, 0x2e, 0x32),
+    headerbar_toggle_hover: Color::from_rgb8(0x22, 0x26, 0x2a),
+    connection_status: Color::from_rgb8(0x89, 0x90, 0x97),
+    connection_status_error: Color::from_rgb8(0xe6, 0x81, 0x78),
+    header_icon: Color::from_rgba8(0xff, 0xff, 0xff, 0.8),
+    sidebar_label: Color::from_rgb8(0x92, 0x99, 0x9f),
+    jobs_heading: Color::from_rgb8(0x8d, 0x95, 0x9d),
+    jobs_count_bg: Color::from_rgb8(0x1c, 0x24, 0x2b),
+    jobs_count_fg: Color::from_rgb8(0xd7, 0xc4, 0xa3),
+    job_subagent_bg: Color::from_rgb8(0x33, 0x28, 0x1a),
+    job_subagent_fg: Color::from_rgb8(0xe5, 0xb5, 0x67),
+    job_shell_bg: Color::from_rgb8(0x1c, 0x27, 0x23),
+    job_shell_fg: Color::from_rgb8(0x9c, 0xc2, 0xad),
+    job_title: Color::from_rgb8(0xd4, 0xd8, 0xdc),
+    job_meta: Color::from_rgb8(0x6a, 0x72, 0x79),
+    drag_preview_shadow: Color::from_rgba8(0x00, 0x00, 0x00, 0.48),
+    user_message_border: Color::from_rgb8(0x31, 0x3a, 0x41),
 };
 
 /// The palette for the active COSMIC theme; light desktops get [`LIGHT`].

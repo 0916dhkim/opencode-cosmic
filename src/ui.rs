@@ -66,6 +66,9 @@ pub struct OpenCodeCosmic {
     active_drawer: Option<DrawerPage>,
     sidebar_open: bool,
     connection_status: String,
+    /// The status carries GTK's `.error` class: the text turns
+    /// `@oc_fg_connection_status_error`.
+    connection_status_error: bool,
     error_banner: Option<String>,
     server_url_input: String,
     username_input: String,
@@ -193,6 +196,14 @@ pub enum Message {
     SettingsPasswordInput(String),
     ApplySettings,
     DismissError,
+    /// The headerbar was dragged (GTK's headerbar moved the window).
+    HeaderDrag,
+    /// The headerbar was double-clicked: toggle maximize like GTK's titlebar.
+    HeaderMaximize,
+    /// The headerbar's minimize button.
+    HeaderMinimize,
+    /// The headerbar's close button.
+    HeaderClose,
 }
 
 impl Application for OpenCodeCosmic {
@@ -210,6 +221,14 @@ impl Application for OpenCodeCosmic {
     }
 
     fn init(core: Core, flags: Self::Flags) -> (Self, Task<Self::Message>) {
+        // GTK's own `GtkHeaderBar` carried the toggle, the title and the window
+        // buttons in the app's colours; libcosmic's headerbar is themed by the
+        // COSMIC theme, so the port draws its own (see `header_bar`).
+        let mut core = core;
+        core.window.show_headerbar = false;
+        // libcosmic insets the content by `border_padding` (7px) on each side;
+        // GTK's content ran to the window edges.
+        core.window.border_padding = Some(0);
         let (state, _) = PersistedState::load(&default_path()).unwrap_or_default();
         let zoom = if (0.5..=3.0).contains(&state.zoom_level) {
             state.zoom_level as f32
@@ -243,7 +262,8 @@ impl Application for OpenCodeCosmic {
             search_query: String::new(),
             active_drawer: None,
             sidebar_open: true,
-            connection_status: "Connecting...".to_string(),
+            connection_status: "Connecting".to_string(),
+            connection_status_error: false,
             error_banner: None,
             server_url_input: server_url,
             username_input: username,
@@ -271,7 +291,7 @@ impl Application for OpenCodeCosmic {
 
         if flags.preview {
             let mut mock = preview::State::new();
-            app.connection_status = "Preview (Offline)".to_string();
+            app.connection_status_error = false;
 
             let b_event = mock.handle(Command::Bootstrap {
                 sessions: Vec::new(),
@@ -640,35 +660,19 @@ impl Application for OpenCodeCosmic {
                 self.error_banner = None;
                 Task::none()
             }
+            // GTK's headerbar: dragging it moved the window, a double click
+            // toggled maximize, and the three window controls did their thing.
+            Message::HeaderDrag => self.drag(),
+            Message::HeaderMaximize => {
+                let maximized = self.core.window.is_maximized;
+                self.core().maximize(None, !maximized)
+            }
+            Message::HeaderMinimize => self.minimize(),
+            Message::HeaderClose => match self.core().main_window_id() {
+                Some(id) => cosmic::iced::window::close::<Message>(id).discard(),
+                None => Task::none(),
+            },
         }
-    }
-
-    fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
-        vec![
-            button::icon(icons::sessions())
-                .on_press(Message::ToggleSidebar)
-                .into(),
-            text("OpenCode")
-                .size(self.em(crate::metrics::px(14.0)))
-                .into(),
-            text("·").size(self.em(crate::metrics::px(12.0))).into(),
-            inline_icon(icons::connection(), self.zoom)
-                .size(self.em(crate::metrics::px(14.0)) as u16)
-                .into(),
-            text(&self.connection_status)
-                .size(self.em(crate::metrics::px(12.0)))
-                .into(),
-        ]
-    }
-
-    fn header_center(&self) -> Vec<Element<'_, Self::Message>> {
-        Vec::new()
-    }
-
-    fn header_end(&self) -> Vec<Element<'_, Self::Message>> {
-        // GTK's headerbar held only the sidebar toggle and the title; the
-        // drawers are reached from the sidebar's footer rows (as in GTK).
-        vec![]
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
@@ -2140,14 +2144,18 @@ impl Application for OpenCodeCosmic {
                 .height(Length::Fill)
         };
 
-        container(body)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(|_theme| container::Style {
-                background: Some(palette::current().window_bg.into()),
-                ..Default::default()
-            })
-            .into()
+        container(
+            column::with_children(vec![self.header_bar(), body.into()])
+                .width(Length::Fill)
+                .height(Length::Fill),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme| container::Style {
+            background: Some(palette::current().window_bg.into()),
+            ..Default::default()
+        })
+        .into()
     }
 
     fn context_drawer(&self) -> Option<ContextDrawer<'_, Self::Message>> {
@@ -2585,6 +2593,48 @@ fn flat_button_class(zoom: f32) -> cosmic::theme::Button {
     }
 }
 
+/// GTK's `headerbar button.sidebar-toggle`: flat, `border-radius: 0.44em`,
+/// hover fill `@oc_bg_headerbar_button_sidebar_toggle_hover`, drawn in Adwaita's
+/// icon colour rather than the theme accent.
+fn header_toggle_class() -> cosmic::theme::Button {
+    let radius = crate::metrics::space(0.44, 1.0);
+    let base = move || cosmic::widget::button::Style {
+        background: None,
+        border_radius: radius.into(),
+        border_width: 0.0,
+        text_color: Some(palette::current().header_icon),
+        icon_color: Some(palette::current().header_icon),
+        ..Default::default()
+    };
+    let hovered = move || cosmic::widget::button::Style {
+        background: Some(palette::current().headerbar_toggle_hover.into()),
+        ..base()
+    };
+    cosmic::theme::Button::Custom {
+        active: Box::new(move |_focused, _theme| base()),
+        hovered: Box::new(move |_focused, _theme| hovered()),
+        pressed: Box::new(move |_focused, _theme| hovered()),
+        disabled: Box::new(move |_theme| base()),
+    }
+}
+
+/// GTK's `windowcontrols button`: flat, the glyph in Adwaita's icon colour.
+fn header_control_class() -> cosmic::theme::Button {
+    let base = move || cosmic::widget::button::Style {
+        background: None,
+        border_width: 0.0,
+        text_color: Some(palette::current().header_icon),
+        icon_color: Some(palette::current().header_icon),
+        ..Default::default()
+    };
+    cosmic::theme::Button::Custom {
+        active: Box::new(move |_focused, _theme| base()),
+        hovered: Box::new(move |_focused, _theme| base()),
+        pressed: Box::new(move |_focused, _theme| base()),
+        disabled: Box::new(move |_theme| base()),
+    }
+}
+
 /// GTK's `.queue-tray-button`: 1.85em minimum height, 1px border, its own
 /// background and text colour.
 fn tray_button_class(radius: f32) -> cosmic::theme::Button {
@@ -2714,6 +2764,138 @@ fn variant_selection(selection: &str) -> Option<String> {
 }
 
 impl OpenCodeCosmic {
+    /// GTK's `GtkHeaderBar`: the sidebar toggle at the start, `OpenCode` and the
+    /// connection status centred on the window, and the window buttons at the
+    /// end. libcosmic's own headerbar is COSMIC-themed (its background comes
+    /// from the theme's base colour, not this client's tokens), so with
+    /// `show_headerbar = false` the port draws the whole bar itself.
+    fn header_bar(&self) -> Element<'_, Message> {
+        // GTK drew the toggle's panel glyph and the window buttons at a fixed
+        // 16px, inside boxes sized by `em` (the toggle) and by Adwaita's
+        // window controls (the buttons).
+        let glyph: u16 = 16;
+        let toggle_size = self.space(2.07);
+        let toggle = button::icon(icons::panel())
+            .icon_size(glyph)
+            .on_press(Message::ToggleSidebar)
+            .padding((toggle_size - f32::from(glyph)) / 2.0)
+            .class(header_toggle_class());
+
+        // GTK's `windowcontrols`: minimize, maximize/restore and close, each a
+        // 39px box flush with the window's right edge.
+        const CONTROL_SIZE: f32 = 39.0;
+        let control_pad = (CONTROL_SIZE - f32::from(glyph)) / 2.0;
+        // GTK centred the title widget on the *window*, so the toggle's side
+        // gets a box as wide as the window controls'.
+        let group_width = CONTROL_SIZE * 3.0;
+        let mut controls: Vec<Element<'_, Message>> = Vec::new();
+        if cosmic::config::show_minimize() {
+            controls.push(
+                button::icon(icons::window_minimize())
+                    .icon_size(glyph)
+                    .on_press(Message::HeaderMinimize)
+                    .padding(control_pad)
+                    .class(header_control_class())
+                    .into(),
+            );
+        }
+        if cosmic::config::show_maximize() {
+            let icon = if self.core.window.is_maximized {
+                icons::window_restore()
+            } else {
+                icons::window_maximize()
+            };
+            controls.push(
+                button::icon(icon)
+                    .icon_size(glyph)
+                    .on_press(Message::HeaderMaximize)
+                    .padding(control_pad)
+                    .class(header_control_class())
+                    .into(),
+            );
+        }
+        controls.push(
+            button::icon(icons::window_close())
+                .icon_size(glyph)
+                .on_press(Message::HeaderClose)
+                .padding(control_pad)
+                .class(header_control_class())
+                .into(),
+        );
+
+        // GTK packed the title widget in the headerbar's centre: `OpenCode`
+        // (bold, `@oc_fg_window`) then the connection status
+        // (`@oc_fg_connection_status`, 0.82em) with a 10px gap.
+        let status_color = if self.connection_status_error {
+            palette::current().connection_status_error
+        } else {
+            palette::current().connection_status
+        };
+        let status = row::with_children(vec![
+            text("OpenCode")
+                .size(self.em(1.0))
+                .font(cosmic::iced::Font {
+                    weight: cosmic::iced::font::Weight::Bold,
+                    ..cosmic::iced::Font::DEFAULT
+                })
+                .class(cosmic::theme::Text::Color(palette::current().window_fg))
+                .into(),
+            text(&self.connection_status)
+                .size(self.em(0.82))
+                .class(cosmic::theme::Text::Color(status_color))
+                .into(),
+        ])
+        .spacing(10.0)
+        .align_y(Alignment::Center);
+
+        // Adwaita's titlebar is 46px high; the em-sized toggle can exceed it at
+        // high zoom, exactly as GTK's min-height let it.
+        let bar_height = 46.0_f32.max(toggle_size);
+
+        let bar = row::with_children(vec![
+            // The toggle's box matches the window controls' width so the
+            // centred group lands on the window's centre like GTK's.
+            container(row::with_children(vec![toggle.into()]).align_y(Alignment::Center))
+                .width(Length::Fixed(group_width))
+                .align_x(Alignment::Start)
+                .into(),
+            // GTK's headerbar was one big drag region; only its buttons did
+            // not move the window.
+            cosmic::iced::widget::mouse_area(
+                container(status)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center),
+            )
+            .on_drag(Message::HeaderDrag)
+            .on_double_press(Message::HeaderMaximize)
+            .into(),
+            row::with_children(controls)
+                .align_y(Alignment::Center)
+                .into(),
+        ])
+        .align_y(Alignment::Center)
+        .width(Length::Fill)
+        .height(Length::Fixed(bar_height))
+        .padding([0.0, 1.0, 0.0, self.space(0.71)]);
+
+        let bar = container(bar)
+            .width(Length::Fill)
+            .height(Length::Fixed(bar_height))
+            .style(|_theme: &cosmic::Theme| container::Style {
+                background: Some(palette::current().headerbar_bg.into()),
+                ..Default::default()
+            });
+
+        column::with_children(vec![
+            bar.into(),
+            hairline(palette::current().headerbar_border),
+        ])
+        .width(Length::Fill)
+        .into()
+    }
+
     /// `factor` em in the current zoom, as whole pixels.
     fn em(&self, factor: f32) -> u32 {
         crate::metrics::em(factor, self.zoom)
@@ -3158,7 +3340,8 @@ impl OpenCodeCosmic {
             Ok((handle, receiver, _server_key)) => {
                 self.api = Some(handle.clone());
                 self.receiver = Some(receiver);
-                self.connection_status = "Connecting...".to_string();
+                self.connection_status = "Connecting".to_string();
+                self.connection_status_error = false;
 
                 handle.send(Command::Bootstrap {
                     sessions: self.tabs.clone(),
@@ -3171,7 +3354,8 @@ impl OpenCodeCosmic {
             }
             Err(e) => {
                 self.error_banner = Some(format!("Failed to connect: {e}"));
-                self.connection_status = "Connection Failed".to_string();
+                self.connection_status = format!("Failed to connect: {e}");
+                self.connection_status_error = true;
             }
         }
     }
@@ -3197,13 +3381,27 @@ impl OpenCodeCosmic {
     fn handle_ui_event(&mut self, event: UiEvent) {
         match event {
             UiEvent::Connection { connected, error } => {
+                self.connection_status_error = !connected;
                 if connected {
                     self.connection_status = "Connected".to_string();
                 } else {
-                    self.connection_status = error.unwrap_or_else(|| "Disconnected".to_string());
+                    self.connection_status = error.unwrap_or_else(|| {
+                        "Disconnected; reconnecting in the background".to_string()
+                    });
                 }
             }
             UiEvent::Bootstrap(Ok(bootstrap)) => {
+                // GTK's connection-status label: `Connected · <version>`, with
+                // the reason appended (and the error colour) when the refresh
+                // came back partial.
+                if bootstrap.warnings.is_empty() {
+                    self.connection_status = format!("Connected · {}", bootstrap.version);
+                    self.connection_status_error = false;
+                } else {
+                    self.connection_status =
+                        format!("Connected · {} · Partial refresh", bootstrap.version);
+                    self.connection_status_error = true;
+                }
                 for session in &bootstrap.sessions {
                     self.sessions.insert(session.id.clone(), session.clone());
                 }

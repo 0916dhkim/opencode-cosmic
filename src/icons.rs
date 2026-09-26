@@ -36,6 +36,16 @@ icons! {
     stop => "stop.svg",
 }
 
+// The GTK headerbar's sidebar toggle: `draw_panel()` in the GTK client drew a
+// rounded panel with a divider line, not the sessions icon.
+icons! {
+    panel => "panel.svg",
+    window_close => "window-close.svg",
+    window_maximize => "window-maximize.svg",
+    window_restore => "window-restore.svg",
+    window_minimize => "window-minimize.svg",
+}
+
 fn symbolic(bytes: &'static [u8]) -> Handle {
     let mut handle = icon::from_svg_bytes(bytes);
     handle.symbolic = true;
