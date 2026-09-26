@@ -290,13 +290,21 @@ impl Application for OpenCodeCosmic {
         };
 
         if flags.preview {
-            let mut mock = preview::State::new();
+            let mock = preview::State::new();
             app.connection_status_error = false;
+            // Hand the mock to the app first: handling an event can send a
+            // follow-up command (the jobs list asks for child sessions), and
+            // in preview mode that has to reach the mock.
+            app.mock_server = Some(mock);
 
-            let b_event = mock.handle(Command::Bootstrap {
-                sessions: Vec::new(),
-                directories: Vec::new(),
-            });
+            let b_event =
+                app.mock_server
+                    .as_mut()
+                    .expect("preview mock")
+                    .handle(Command::Bootstrap {
+                        sessions: Vec::new(),
+                        directories: Vec::new(),
+                    });
             app.handle_ui_event(b_event);
 
             let s_state = preview::server_state();
@@ -305,22 +313,38 @@ impl Application for OpenCodeCosmic {
                 app.tabs.push(tab.id.clone());
             }
             app.active_session_id = s_state.active;
+            // GTK's preview handed this state to the app as its persisted
+            // state, so the unread set reached the session rows.
+            app.unread = s_state.unread.clone();
             app.focus_composer = app.active_session_id.is_some();
 
             for tab in &s_state.tabs {
-                let m_event = mock.handle(Command::LoadMessages {
-                    session_id: tab.id.clone(),
-                    cursor: None,
-                });
+                let m_event =
+                    app.mock_server
+                        .as_mut()
+                        .expect("preview mock")
+                        .handle(Command::LoadMessages {
+                            session_id: tab.id.clone(),
+                            cursor: None,
+                        });
                 app.handle_ui_event(m_event);
             }
 
-            let mod_event = mock.handle(Command::LoadModels {
-                directory: "/repo".to_string(),
-            });
+            let mod_event =
+                app.mock_server
+                    .as_mut()
+                    .expect("preview mock")
+                    .handle(Command::LoadModels {
+                        directory: "/repo".to_string(),
+                    });
             app.handle_ui_event(mod_event);
 
-            for event in mock.take_server_events() {
+            for event in app
+                .mock_server
+                .as_mut()
+                .expect("preview mock")
+                .take_server_events()
+            {
                 app.handle_ui_event(event);
             }
             app.projects = vec![
@@ -344,7 +368,6 @@ impl Application for OpenCodeCosmic {
                 PathBuf::from("/state/home/paperclip-22px.png"),
                 PathBuf::from("/state/home/composer-actions-34x32.png"),
             ];
-            app.mock_server = Some(mock);
         } else {
             app.connect_api();
         }
@@ -690,7 +713,7 @@ impl Application for OpenCodeCosmic {
             .align_y(Alignment::Center),
         )
         .on_press(Message::NewSession)
-        .class(flat_button_class(self.zoom))
+        .class(sidebar_row_class(self.zoom))
         .width(Length::Fill)
         .padding([self.pad_px(8.0), self.pad_px(12.0)]);
         sidebar_items.push(
@@ -729,8 +752,6 @@ impl Application for OpenCodeCosmic {
                 palette::current().status_idle
             };
 
-            let display_title = truncate_title(title, 28);
-
             let mut marker_items: Vec<Element<'_, Message>> = Vec::new();
             if is_busy || has_jobs {
                 marker_items.push(
@@ -763,16 +784,16 @@ impl Application for OpenCodeCosmic {
             };
 
             // GTK: a finished run or unread output recolours the title (both
-            // bold), the active row uses the header title colour, the rest the
-            // sidebar's own foreground.
+            // bold), the active row uses the active-title colour, and the rest
+            // the sidebar's own foreground (`@oc_fg_sidebar_new_session`).
             let title_class = if is_busy {
                 cosmic::theme::Text::Color(palette::current().status_busy)
             } else if is_unread {
                 cosmic::theme::Text::Color(palette::current().tab_unread_text)
             } else if is_active {
-                cosmic::theme::Text::Color(palette::current().header_title_text)
+                cosmic::theme::Text::Color(palette::current().tab_active_text)
             } else {
-                cosmic::theme::Text::Default
+                cosmic::theme::Text::Color(palette::current().sidebar_label)
             };
             let title_weight = if is_busy || is_unread {
                 cosmic::iced::font::Weight::Bold
@@ -792,9 +813,12 @@ impl Application for OpenCodeCosmic {
             let tab_btn = container(
                 row::with_children(vec![
                     status_marker,
-                    text(display_title)
+                    text(title)
                         .size(self.em(1.0))
                         .wrapping(cosmic::iced::widget::text::Wrapping::None)
+                        .ellipsize(cosmic::iced::widget::text::Ellipsize::End(
+                            cosmic::iced::core::text::EllipsizeHeightLimit::Lines(1),
+                        ))
                         .font(cosmic::iced::Font {
                             weight: title_weight,
                             ..cosmic::iced::Font::DEFAULT
@@ -930,50 +954,143 @@ impl Application for OpenCodeCosmic {
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
 
-            let mut jobs_col_items = Vec::new();
+            // GTK's `.background-jobs`: a separator, `BACKGROUND` with a count
+            // badge, then one plain row per job — a square kind badge, the
+            // title and `<kind> · [owner ·] <elapsed>`.
+            let mut jobs_col_items: Vec<Element<'_, Message>> = Vec::new();
             jobs_col_items.push(
-                text(format!("BACKGROUND ({})", job_rows.len()))
-                    .size(self.em(crate::metrics::px(11.0)))
+                container(hairline(palette::current().nav_separator))
+                    .padding([
+                        self.space(0.3) as u16,
+                        self.space(0.3) as u16,
+                        self.space(0.44) as u16,
+                        self.space(0.3) as u16,
+                    ])
                     .into(),
             );
 
-            for row in job_rows {
-                let kind_str = match row.kind {
-                    JobKind::Subagent => "◆",
-                    JobKind::Shell => "$",
-                };
-
-                let item = column::with_children(vec![
-                    text(format!("{kind_str} {}", row.title))
-                        .size(self.em(crate::metrics::px(12.0)))
-                        .into(),
-                    text(row.subtitle(now))
-                        .size(self.em(crate::metrics::px(10.0)))
-                        .into(),
+            let count_radius = self.space(999.0);
+            let count = container(
+                text(job_rows.len().to_string())
+                    .size(self.em(0.76))
+                    .class(cosmic::theme::Text::Color(palette::current().jobs_count_fg)),
+            )
+            .padding([0.0, self.space(0.52)])
+            .style(move |_theme: &cosmic::Theme| container::Style {
+                background: Some(palette::current().jobs_count_bg.into()),
+                border: Border {
+                    radius: count_radius.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+            jobs_col_items.push(
+                container(
+                    row::with_children(vec![
+                        text("BACKGROUND")
+                            .size(self.em(0.8))
+                            .font(cosmic::iced::Font {
+                                weight: cosmic::iced::font::Weight::Bold,
+                                ..cosmic::iced::Font::DEFAULT
+                            })
+                            .class(cosmic::theme::Text::Color(palette::current().jobs_heading))
+                            .into(),
+                        container(count)
+                            .padding([0.0, 0.0, 0.0, self.space(0.44)])
+                            .into(),
+                    ])
+                    .align_y(Alignment::Center),
+                )
+                .padding([
+                    self.space(0.44) as u16,
+                    self.space(0.74) as u16,
+                    self.space(0.3) as u16,
+                    self.space(0.74) as u16,
                 ])
-                .spacing(self.space(crate::metrics::px(1.0)));
+                .into(),
+            );
 
-                let job_card = container(item)
-                    .padding([self.pad_px(4.0), self.pad_px(8.0)])
-                    .width(Length::Fill)
-                    .style(|_theme| container::Style {
-                        background: Some(palette::current().card_bg.into()),
+            for row in job_rows {
+                let (glyph, icon_bg, icon_fg) = match row.kind {
+                    JobKind::Subagent => (
+                        "\u{25c6}",
+                        palette::current().job_subagent_bg,
+                        palette::current().job_subagent_fg,
+                    ),
+                    JobKind::Shell => (
+                        "$",
+                        palette::current().job_shell_bg,
+                        palette::current().job_shell_fg,
+                    ),
+                };
+                let icon_radius = self.space(0.37);
+                let mut glyph_text = text(glyph)
+                    .size(self.em(0.8))
+                    .font(cosmic::iced::Font {
+                        weight: cosmic::iced::font::Weight::Bold,
+                        ..cosmic::iced::Font::DEFAULT
+                    })
+                    .class(cosmic::theme::Text::Color(icon_fg));
+                if row.kind == JobKind::Shell {
+                    glyph_text = glyph_text.font(cosmic::iced::Font::MONOSPACE);
+                }
+                let icon = container(glyph_text)
+                    .width(Length::Fixed(self.space(1.33)))
+                    .height(Length::Fixed(self.space(1.33)))
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center)
+                    .style(move |_theme: &cosmic::Theme| container::Style {
+                        background: Some(icon_bg.into()),
                         border: Border {
-                            color: palette::current().panel_border,
-                            width: 1.0,
-                            radius: 4.0.into(),
+                            radius: icon_radius.into(),
+                            ..Default::default()
                         },
                         ..Default::default()
                     });
 
-                jobs_col_items.push(job_card.into());
+                let (label, elapsed) = row.subtitle_parts(now);
+                let meta_class = cosmic::theme::Text::Color(palette::current().job_meta);
+                let mut meta_items: Vec<Element<'_, Message>> =
+                    vec![text(label).size(self.em(0.85)).class(meta_class).into()];
+                if let Some(elapsed) = elapsed {
+                    meta_items.push(
+                        text(format!(" · {elapsed}"))
+                            .size(self.em(0.85))
+                            .class(meta_class)
+                            .into(),
+                    );
+                }
+
+                let job_text = column::with_children(vec![
+                    text(row.title.clone())
+                        .size(self.em(0.96))
+                        .wrapping(cosmic::iced::widget::text::Wrapping::None)
+                        .ellipsize(cosmic::iced::widget::text::Ellipsize::End(
+                            cosmic::iced::core::text::EllipsizeHeightLimit::Lines(1),
+                        ))
+                        .class(cosmic::theme::Text::Color(palette::current().job_title))
+                        .width(Length::Fill)
+                        .into(),
+                    row::with_children(meta_items).into(),
+                ]);
+
+                jobs_col_items.push(
+                    container(row::with_children(vec![
+                        container(icon)
+                            .padding([0.0, self.space(0.67), 0.0, 0.0])
+                            .into(),
+                        job_text.width(Length::Fill).into(),
+                    ]))
+                    .padding([self.space(0.44) as u16, self.space(0.74) as u16])
+                    .into(),
+                );
             }
 
-            let jobs_section = container(
-                column::with_children(jobs_col_items).spacing(self.space(crate::metrics::px(4.0))),
-            )
-            .padding([self.pad_px(6.0), self.pad_px(8.0)]);
-            sidebar_items.push(jobs_section.into());
+            sidebar_items.push(
+                container(column::with_children(jobs_col_items).spacing(2))
+                    .padding([0.0, self.space(0.59), self.space(0.3), self.space(0.59)])
+                    .into(),
+            );
         }
 
         let footer_buttons = column::with_children(vec![
@@ -987,7 +1104,7 @@ impl Application for OpenCodeCosmic {
                 "Search tabs (Ctrl+P)",
             ))
             .on_press(Message::ToggleDrawer(DrawerPage::Sessions))
-            .class(flat_button_class(self.zoom))
+            .class(sidebar_row_class(self.zoom))
             .width(Length::Fill)
             .padding([
                 self.pad_px(11.0),
@@ -1008,7 +1125,7 @@ impl Application for OpenCodeCosmic {
                 "Server connection (Ctrl+,)",
             ))
             .on_press(Message::ToggleDrawer(DrawerPage::Settings))
-            .class(flat_button_class(self.zoom))
+            .class(sidebar_row_class(self.zoom))
             .width(Length::Fill)
             .padding([
                 self.pad_px(11.0),
@@ -1028,20 +1145,24 @@ impl Application for OpenCodeCosmic {
         ]);
         sidebar_items.push(footer_container.into());
 
-        // GTK measured ≈272px in the last screenshots.
+        // GTK's paned position: 270px (plus the 1px right border).
         let sidebar_column = column::with_children(sidebar_items)
-            .width(Length::Fixed(272.0))
+            .width(Length::Fixed(270.0))
             .height(Length::Fill);
 
+        // GTK's `.tab-strip`: the sidebar background with a 1px right border
+        // only (the header's hairline closes the top).
         let sidebar = container(sidebar_column)
             .height(Length::Fill)
             .style(|_theme| container::Style {
                 background: Some(palette::current().sidebar_bg.into()),
-                border: Border {
-                    color: palette::current().sidebar_border,
-                    width: 1.0,
-                    radius: 0.0.into(),
-                },
+                ..Default::default()
+            });
+        let sidebar_divider = container(row::with_children(Vec::<Element<'_, Message>>::new()))
+            .width(Length::Fixed(1.0))
+            .height(Length::Fill)
+            .style(|_theme| container::Style {
+                background: Some(palette::current().sidebar_border.into()),
                 ..Default::default()
             });
 
@@ -2135,9 +2256,13 @@ impl Application for OpenCodeCosmic {
             .height(Length::Fill);
 
         let body = if self.sidebar_open {
-            row::with_children(vec![sidebar.into(), main_pane.into()])
-                .width(Length::Fill)
-                .height(Length::Fill)
+            row::with_children(vec![
+                sidebar.into(),
+                sidebar_divider.into(),
+                main_pane.into(),
+            ])
+            .width(Length::Fill)
+            .height(Length::Fill)
         } else {
             row::with_children(vec![main_pane.into()])
                 .width(Length::Fill)
@@ -2366,12 +2491,15 @@ fn tab_action_class(shown: bool, radius: f32) -> cosmic::theme::Button {
         background: None,
         border_radius: radius.into(),
         border_width: 0.0,
-        text_color: if shown {
-            None
+        // GTK: `@oc_fg_sidebar_new_session` dimmed to 45% until the row is
+        // active or hovered, then `@oc_fg_session_tab_active_session_tab_title`
+        // at full strength.
+        text_color: Some(if shown {
+            palette::current().tab_active_text
         } else {
-            let fg = palette::current().header_title_text;
-            Some(cosmic::iced::Color::from_rgba(fg.r, fg.g, fg.b, 0.45))
-        },
+            let fg = palette::current().sidebar_label;
+            cosmic::iced::Color::from_rgba(fg.r, fg.g, fg.b, 0.45)
+        }),
         ..Default::default()
     };
     cosmic::theme::Button::Custom {
@@ -2388,12 +2516,12 @@ fn close_button_class(shown: bool, radius: f32) -> cosmic::theme::Button {
         background: None,
         border_radius: radius.into(),
         border_width: 0.0,
-        text_color: if shown {
-            None
+        text_color: Some(if shown {
+            palette::current().tab_active_text
         } else {
-            let fg = palette::current().header_title_text;
-            Some(cosmic::iced::Color::from_rgba(fg.r, fg.g, fg.b, 0.45))
-        },
+            let fg = palette::current().sidebar_label;
+            cosmic::iced::Color::from_rgba(fg.r, fg.g, fg.b, 0.45)
+        }),
         ..Default::default()
     };
     let hovered = move || cosmic::widget::button::Style {
@@ -2555,6 +2683,30 @@ fn modal_row_class(radius: f32) -> cosmic::theme::Button {
         border_radius: radius.into(),
         border_width: 0.0,
         text_color: Some(palette::current().header_title_text),
+        ..Default::default()
+    };
+    let hovered = move || cosmic::widget::button::Style {
+        background: Some(palette::current().sidebar_hover_bg.into()),
+        ..base()
+    };
+    cosmic::theme::Button::Custom {
+        active: Box::new(move |_focused, _theme| base()),
+        hovered: Box::new(move |_focused, _theme| hovered()),
+        pressed: Box::new(move |_focused, _theme| base()),
+        disabled: Box::new(move |_theme| base()),
+    }
+}
+
+/// GTK's `.sidebar-new-session` / `.sidebar-nav`: flat, the label and its icon
+/// in `@oc_fg_sidebar_new_session`, with the sidebar's hover fill.
+fn sidebar_row_class(zoom: f32) -> cosmic::theme::Button {
+    let radius = crate::metrics::space(0.52, zoom);
+    let base = move || cosmic::widget::button::Style {
+        background: None,
+        border_radius: radius.into(),
+        border_width: 0.0,
+        text_color: Some(palette::current().sidebar_label),
+        icon_color: Some(palette::current().sidebar_label),
         ..Default::default()
     };
     let hovered = move || cosmic::widget::button::Style {
@@ -2894,6 +3046,67 @@ impl OpenCodeCosmic {
         ])
         .width(Length::Fill)
         .into()
+    }
+
+    /// Runs `change` on the jobs list with the root sessions and the locations
+    /// a refresh lists shells in (GTK's `with_jobs`).
+    fn with_jobs<R>(
+        &mut self,
+        change: impl FnOnce(&mut crate::jobs::Jobs, &crate::jobs::Context) -> R,
+    ) -> R {
+        let directories = self.pending_directories();
+        let roots: Vec<Session> = self.sessions.values().cloned().collect();
+        let context = crate::jobs::Context {
+            roots: &roots,
+            directories: &directories,
+        };
+        change(&mut self.jobs, &context)
+    }
+
+    /// Sends a command to the live API, or drives the canned preview server
+    /// with it (the preview has no API handle).
+    fn send_command(&mut self, command: Command) {
+        if let Some(api) = &self.api {
+            api.send(command);
+        } else if let Some(mock) = &mut self.mock_server {
+            let event = mock.handle(command);
+            self.handle_ui_event(event);
+        }
+    }
+
+    /// Fetches the sessions the jobs list is missing (child sessions and their
+    /// parents), each once (GTK's `job_info_command`).
+    fn job_info_command(&mut self) -> Option<Command> {
+        let session_ids = self.with_jobs(|jobs, context| jobs.take_wanted(context));
+        (!session_ids.is_empty()).then_some(Command::LoadSessionInfo { session_ids })
+    }
+
+    /// The locations of the open prompts and forms.
+    fn open_request_directories(&self) -> Vec<String> {
+        let directories: std::collections::BTreeSet<&str> = self
+            .forms
+            .directories()
+            .filter(|directory| !directory.is_empty())
+            .collect();
+        directories.into_iter().map(str::to_owned).collect()
+    }
+
+    /// The locations whose pending lists a reconciliation fetches: open tabs,
+    /// running sessions and open forms
+    /// ([`crate::pending::pending_directories`]).
+    fn pending_directories(&self) -> Vec<String> {
+        let open = self.open_request_directories();
+        let roots: Vec<Session> = self.sessions.values().cloned().collect();
+        crate::pending::pending_directories(
+            &roots,
+            self.tabs.iter().map(String::as_str).chain(
+                self.statuses
+                    .iter()
+                    .filter(|(_, status)| status.is_busy())
+                    .map(|(id, _)| id.as_str()),
+            ),
+            open.iter().map(String::as_str),
+        )
     }
 
     /// `factor` em in the current zoom, as whole pixels.
@@ -3417,19 +3630,19 @@ impl OpenCodeCosmic {
                     }
                 }
 
-                let roots: Vec<Session> = self.sessions.values().cloned().collect();
-                let ctx = jobs::Context {
-                    roots: &roots,
-                    directories: &[],
-                };
                 let active_statuses: HashSet<String> = bootstrap
                     .statuses
                     .iter()
                     .filter(|(_, st)| st.is_busy())
                     .map(|(id, _)| id.clone())
                     .collect();
-                self.jobs
-                    .apply_snapshot(Some(&active_statuses), bootstrap.shells, &ctx);
+                self.with_jobs(|jobs, ctx| {
+                    jobs.apply_snapshot(Some(&active_statuses), bootstrap.shells, ctx);
+                });
+                // GTK fetched the child sessions the job rows name.
+                if let Some(command) = self.job_info_command() {
+                    self.send_command(command);
+                }
 
                 let saved = self.state.servers.get(&self.state.connection.server);
                 if self.tabs.is_empty() {
@@ -3477,6 +3690,14 @@ impl OpenCodeCosmic {
                         });
                         api.send(Command::LoadModels { directory: dir });
                     }
+                }
+            }
+            UiEvent::SessionInfoLoaded(results) => {
+                // GTK's job rows: the sessions the list asked for, then the
+                // next batch (a chain of parents still missing).
+                self.jobs.apply_session_info(results);
+                if let Some(command) = self.job_info_command() {
+                    self.send_command(command);
                 }
             }
             UiEvent::Bootstrap(Err(err)) => {
