@@ -202,6 +202,8 @@ pub struct Palette {
     /// `@oc_fg_session_tab_active_session_tab_title` — the active row's title
     /// and its action glyphs.
     pub tab_active_text: Color,
+    /// `@oc_border_message_image` — the outline of an inline message image.
+    pub message_image_border: Color,
 }
 
 pub const LIGHT: Palette = Palette {
@@ -298,6 +300,7 @@ pub const LIGHT: Palette = Palette {
     drag_preview_shadow: Color::from_rgba(40.0 / 255.0, 38.0 / 255.0, 35.0 / 255.0, 0.22),
     user_message_border: Color::from_rgb8(0xcf, 0xc6, 0xb6),
     tab_active_text: Color::from_rgb8(0x24, 0x23, 0x21),
+    message_image_border: Color::from_rgba8(0x24, 0x23, 0x21, 0.14),
 };
 
 pub const DARK: Palette = Palette {
@@ -394,6 +397,7 @@ pub const DARK: Palette = Palette {
     drag_preview_shadow: Color::from_rgba8(0x00, 0x00, 0x00, 0.48),
     user_message_border: Color::from_rgb8(0x31, 0x3a, 0x41),
     tab_active_text: Color::from_rgb8(0xf2, 0xef, 0xe9),
+    message_image_border: Color::from_rgba8(0x00, 0x00, 0x00, 0.0),
 };
 
 /// The palette for the active COSMIC theme; light desktops get [`LIGHT`].

@@ -426,33 +426,44 @@ impl ChatMessage {
         blocks.join("\n\n")
     }
 
-    fn transcript_rows(&self) -> Vec<String> {
+    /// The message split into GTK's transcript rows: the accumulated text and
+    /// images become a row, a reasoning or tool segment becomes its own row,
+    /// and the error, if any, closes the message.
+    pub fn rows(&self) -> Vec<TranscriptRow> {
         let mut rows = Vec::new();
-        let mut blocks = Vec::new();
-        let mut images = Vec::new();
-        let role = self.role.label();
+        let mut blocks: Vec<String> = Vec::new();
+        let mut images: Vec<String> = Vec::new();
+        let role = self.role;
+        let mut push = |body: String, images: Vec<String>, time: u64, kind: TranscriptRowKind| {
+            if body.is_empty() && images.is_empty() {
+                return;
+            }
+            rows.push(TranscriptRow {
+                role,
+                body,
+                images,
+                time,
+                kind,
+            });
+        };
         for segment in &self.segments {
             if matches!(segment.kind, SegmentKind::Tool | SegmentKind::Reasoning) {
-                push_transcript_row(
-                    &mut rows,
-                    role,
+                push(
                     blocks.join("\n\n"),
-                    images,
+                    std::mem::take(&mut images),
                     self.created,
-                    "",
+                    TranscriptRowKind::Normal,
                 );
                 blocks = Vec::new();
-                images = Vec::new();
                 if !segment.text.trim().is_empty() {
                     let (body, kind) = match segment.kind {
-                        SegmentKind::Reasoning => {
-                            (format!("Reasoning\n{}", segment.text.trim()), "reasoning")
-                        }
-                        _ => (segment.text.clone(), "tool"),
+                        SegmentKind::Reasoning => (
+                            format!("Reasoning\n{}", segment.text.trim()),
+                            TranscriptRowKind::Reasoning,
+                        ),
+                        _ => (segment.text.clone(), TranscriptRowKind::Tool),
                     };
-                    push_transcript_row(
-                        &mut rows,
-                        role,
+                    push(
                         body,
                         Vec::new(),
                         if segment.created == 0 {
@@ -472,32 +483,70 @@ impl ChatMessage {
                 images.push(url.clone());
             }
         }
-        if !blocks.is_empty() || !images.is_empty() {
-            push_transcript_row(
-                &mut rows,
-                role,
-                blocks.join("\n\n"),
-                images,
-                self.created,
-                "",
-            );
-        }
+        push(
+            blocks.join("\n\n"),
+            std::mem::take(&mut images),
+            self.created,
+            TranscriptRowKind::Normal,
+        );
         if let Some(error) = &self.error {
-            push_transcript_row(
-                &mut rows,
-                role,
+            push(
                 error.clone(),
                 Vec::new(),
                 self.created,
-                "error",
+                TranscriptRowKind::Error,
             );
         }
         rows
     }
 
+    fn transcript_rows(&self) -> Vec<String> {
+        self.rows()
+            .into_iter()
+            .map(|row| {
+                let kind = match row.kind {
+                    TranscriptRowKind::Normal => "",
+                    TranscriptRowKind::Reasoning => "reasoning",
+                    TranscriptRowKind::Tool => "tool",
+                    TranscriptRowKind::Error => "error",
+                };
+                serde_json::json!({
+                    "role": row.role.label(),
+                    "body": row.body,
+                    "images": row.images,
+                    "time": row.time,
+                    "kind": kind,
+                })
+                .to_string()
+            })
+            .collect()
+    }
+
     fn segment_mut(&mut self, key: &str) -> Option<&mut Segment> {
         self.segments.iter_mut().find(|segment| segment.key == key)
     }
+}
+
+/// The kind of a transcript row: GTK gave reasoning, tool and error rows
+/// their own widget classes (`message-reasoning`, `message-error-row`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TranscriptRowKind {
+    Normal,
+    Reasoning,
+    Tool,
+    Error,
+}
+
+/// One rendered transcript row (GTK's `TranscriptRow`): a message is split at
+/// every reasoning and tool segment, so each gets its own header, timestamp
+/// and row styling.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TranscriptRow {
+    pub role: Role,
+    pub body: String,
+    pub images: Vec<String>,
+    pub time: u64,
+    pub kind: TranscriptRowKind,
 }
 
 /// One undelivered user prompt (a tray row).

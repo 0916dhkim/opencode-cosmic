@@ -6,6 +6,21 @@ use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, T
 use crate::metrics::{em, space};
 use crate::palette;
 
+/// GTK's line heights for the transcript: `.message-plain-text` and
+/// `.markdown-paragraph` are 1.45, `.markdown-heading` 1.2 and the code
+/// content inherits `.message-content`'s 1.35.
+fn body_line_height() -> cosmic::iced::core::text::LineHeight {
+    cosmic::iced::core::text::LineHeight::Relative(1.45)
+}
+
+fn heading_line_height() -> cosmic::iced::core::text::LineHeight {
+    cosmic::iced::core::text::LineHeight::Relative(1.2)
+}
+
+fn code_line_height() -> cosmic::iced::core::text::LineHeight {
+    cosmic::iced::core::text::LineHeight::Relative(1.35)
+}
+
 #[derive(Clone, Debug)]
 pub enum MarkdownBlock {
     Paragraph(String),
@@ -150,7 +165,12 @@ where
     for block in blocks {
         match block {
             MarkdownBlock::Paragraph(p) => {
-                elements.push(text(p).size(em(0.96, zoom)).into());
+                elements.push(
+                    text(p)
+                        .size(em(0.96, zoom))
+                        .line_height(body_line_height())
+                        .into(),
+                );
             }
             MarkdownBlock::Heading(level, h) => {
                 // GTK: .markdown-heading-1/2/3 = 1.45 / 1.28 / 1.14em.
@@ -163,6 +183,7 @@ where
                 elements.push(
                     text(h)
                         .size(size)
+                        .line_height(heading_line_height())
                         .class(cosmic::theme::Text::Color(
                             palette::current().header_title_text,
                         ))
@@ -182,7 +203,9 @@ where
                             .width(Length::Fill)
                             .into(),
                         button::icon(crate::icons::copy())
-                            .padding([2, 6])
+                            // GTK's `button.markdown-code-copy` is 1.93em
+                            // square, which sets the header's height.
+                            .padding(space(0.35, zoom))
                             .on_press(on_copy(code.clone()))
                             .into(),
                     ])
@@ -202,10 +225,12 @@ where
 
                 let code_text = text(code)
                     .font(cosmic::iced::Font::MONOSPACE)
-                    .size(em(0.92, zoom));
+                    .size(em(0.92, zoom))
+                    .line_height(code_line_height());
 
                 let code_container = container(code_text)
-                    .padding([space(0.59, zoom) as u16, space(0.74, zoom) as u16])
+                    // GTK's scrolled window around the code label: 10px above, 12px below.
+                    .padding([10.0, 12.0])
                     .width(Length::Fill)
                     .style(|_theme| container::Style {
                         text_color: Some(palette::current().code_content_text),
@@ -237,7 +262,11 @@ where
                             .size(em(0.96, zoom))
                             .class(cosmic::theme::Text::Color(palette::current().muted_text))
                             .into(),
-                        text(item).size(em(0.96, zoom)).width(Length::Fill).into(),
+                        text(item)
+                            .size(em(0.96, zoom))
+                            .line_height(body_line_height())
+                            .width(Length::Fill)
+                            .into(),
                     ]);
                     list_col = list_col.push(bullet_item);
                 }

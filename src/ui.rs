@@ -62,6 +62,8 @@ pub struct OpenCodeCosmic {
     statuses: HashMap<String, RunStatus>,
     jobs: jobs::Jobs,
     composer_text: String,
+    /// GTK's composer was a multi-line text view, not a one-line entry.
+    composer_editor: cosmic::widget::text_editor::Content,
     search_query: String,
     active_drawer: Option<DrawerPage>,
     sidebar_open: bool,
@@ -92,11 +94,16 @@ pub struct OpenCodeCosmic {
     forms: crate::pending::Forms,
     /// How far the transcript is scrolled from its start (loading older
     /// history) and from its end (following the run, GTK's sticky prompt).
-    transcript_from_top: f32,
-    transcript_from_bottom: f32,
+    /// Scroll position: pixels scrolled past the transcript's start.
+    transcript_offset: f32,
+    /// Pixels still left below the viewport (0 at the very end).
+    transcript_remaining: f32,
     /// The transcript is following the end of the run (the user has not
     /// scrolled up).
     transcript_follow: bool,
+    /// The modifiers of the latest key event: the composer's editor reports an
+    /// Enter action without them.
+    modifiers: cosmic::iced::keyboard::Modifiers,
     /// An older-history request is in flight.
     history_loading: bool,
     /// The session row a drag started on, and the row it would land on:
@@ -130,7 +137,8 @@ pub enum Message {
     CloseActiveTab,
     CycleTab(i32),
     SelectTabIndex(usize),
-    ComposerInput(String),
+    /// A change in the multi-line composer.
+    ComposerEdit(cosmic::widget::text_editor::Action),
     SendPrompt(SendMode),
     /// Enter in the composer; the run status decides send/steer/queue.
     ComposerEnter {
@@ -148,10 +156,13 @@ pub enum Message {
         session_id: String,
         decision: protocol::PermissionDecision,
     },
+    /// Opens the server's web UI in the desktop's browser.
+    OpenWebUi,
     /// Cancels the form the notice points at (GTK's `Ctrl+Shift+X`).
     CancelVisibleForm,
     /// Alt was pressed or released: GTK's tab shortcut hint.
     AltHint(bool),
+    ModifiersChanged(cosmic::iced::keyboard::Modifiers),
     /// GTK's "Load earlier messages" button.
     LoadOlderHistory,
     /// The cursor entered or left a session row.
@@ -259,6 +270,7 @@ impl Application for OpenCodeCosmic {
             statuses: HashMap::new(),
             jobs: jobs::Jobs::default(),
             composer_text: String::new(),
+            composer_editor: cosmic::widget::text_editor::Content::new(),
             search_query: String::new(),
             active_drawer: None,
             sidebar_open: true,
@@ -276,9 +288,10 @@ impl Application for OpenCodeCosmic {
             tray_in_flight: false,
             permissions: Vec::new(),
             forms: crate::pending::Forms::default(),
-            transcript_from_top: 0.0,
-            transcript_from_bottom: 0.0,
+            transcript_offset: 0.0,
+            transcript_remaining: 0.0,
             transcript_follow: true,
+            modifiers: cosmic::iced::keyboard::Modifiers::default(),
             history_loading: false,
             tab_drag: None,
             hovered_tab: None,
@@ -417,16 +430,16 @@ impl Application for OpenCodeCosmic {
                 self.drain_events();
                 let mut tasks = Vec::new();
                 if focus {
-                    tasks.push(cosmic::widget::text_input::focus(composer_id()));
+                    tasks.push(focus_composer());
                 }
                 // GTK's transcript followed the run; the scroll itself reports
                 // back through `TranscriptScrolled`.
                 if self.transcript_follow {
-                    tasks.push(cosmic::iced::widget::scrollable::snap_to(
+                    tasks.push(cosmic::iced::widget::scrollable::scroll_to(
                         transcript_id(),
-                        cosmic::iced::widget::scrollable::RelativeOffset {
+                        cosmic::iced::widget::scrollable::AbsoluteOffset {
                             x: None,
-                            y: Some(1.0),
+                            y: Some(f32::MAX),
                         },
                     ));
                 }
@@ -509,12 +522,17 @@ impl Application for OpenCodeCosmic {
                 // The transcript is anchored to its end, so the absolute offset
                 // is the distance from the end and the reversed one from the
                 // start (where older history is).
-                self.transcript_from_bottom = viewport.absolute_offset().y;
-                self.transcript_from_top = viewport.absolute_offset_reversed().y;
+                self.transcript_offset = viewport.absolute_offset().y;
+                self.transcript_remaining = viewport.absolute_offset_reversed().y;
                 // Follow the run until the user scrolls up; scrolling back to
                 // the end resumes it, the way GTK's transcript behaved.
-                self.transcript_follow = self.transcript_from_bottom < 24.0;
+                // GTK followed the run while the viewport sat at the bottom.
+                self.transcript_follow = self.transcript_remaining < 24.0;
                 self.load_older_history();
+                Task::none()
+            }
+            Message::OpenWebUi => {
+                self.open_web_ui();
                 Task::none()
             }
             Message::CancelVisibleForm => {
@@ -543,6 +561,11 @@ impl Application for OpenCodeCosmic {
                     .map(|session| session.title.clone())
                     .unwrap_or_default();
                 self.active_drawer = Some(DrawerPage::Rename);
+                Task::none()
+            }
+            Message::ModifiersChanged(modifiers) => {
+                self.modifiers = modifiers;
+                self.shortcut_hint = modifiers.alt();
                 Task::none()
             }
             Message::AltHint(alt) => {
@@ -577,8 +600,24 @@ impl Application for OpenCodeCosmic {
                 }
                 Task::none()
             }
-            Message::ComposerInput(val) => {
-                self.composer_text = val;
+            Message::ComposerEdit(action) => {
+                // Enter (and Ctrl+Enter) are captured by the key subscription;
+                // this is the fallback when the editor sees them first, and
+                // the path for every other edit, Shift+Enter's newline
+                // included.
+                if let cosmic::widget::text_editor::Action::Edit(
+                    cosmic::widget::text_editor::Edit::Enter,
+                ) = &action
+                {
+                    let busy = self
+                        .active_session_id
+                        .as_deref()
+                        .is_some_and(|id| self.is_session_busy(id));
+                    self.send_composer_prompt(enter_mode(busy, self.modifiers.control()));
+                    return Task::none();
+                }
+                self.composer_editor.perform(action);
+                self.composer_text = self.composer_editor.text();
                 Task::none()
             }
             Message::SendPrompt(mode) => {
@@ -598,7 +637,7 @@ impl Application for OpenCodeCosmic {
                 self.send_composer_prompt(enter_mode(busy, ctrl));
                 Task::none()
             }
-            Message::FocusComposer => cosmic::widget::text_input::focus(composer_id()),
+            Message::FocusComposer => focus_composer(),
             Message::PickAttachments => {
                 self.pick_attachments();
                 Task::none()
@@ -1292,277 +1331,234 @@ impl Application for OpenCodeCosmic {
                     if message.role == Role::User && tray_items.iter().any(|t| t.id == message.id) {
                         continue;
                     }
-
-                    let is_user = message.role == Role::User;
-                    let role_text = if is_user { "YOU" } else { "AGENT" };
-                    let role_color = if is_user {
-                        palette::current().user_role_text
-                    } else {
-                        palette::current().muted_text
-                    };
-
-                    // GTK: `.message-role` 0.76em/700 plus a right-aligned
-                    // `.message-time` 0.76em.
-                    let header_row = row::with_children(vec![
-                        text(role_text)
-                            .size(self.em(0.76))
-                            .font(cosmic::iced::Font {
-                                weight: cosmic::iced::font::Weight::Bold,
-                                ..cosmic::iced::Font::DEFAULT
-                            })
-                            .class(cosmic::theme::Text::Color(role_color))
-                            .width(Length::Fill)
-                            .into(),
-                        text(clock_time(message.created))
-                            .size(self.em(0.76))
-                            .class(cosmic::theme::Text::Color(palette::current().time_text))
-                            .into(),
-                    ])
-                    .align_y(Alignment::Center);
-
-                    let mut turn_items = Vec::new();
-                    turn_items.push(header_row.into());
-
-                    for segment in message.segments() {
-                        match segment.kind {
-                            model::SegmentKind::Text => {
-                                if !segment.text.trim().is_empty() {
-                                    turn_items.push(markdown::render_markdown(
-                                        &segment.text,
-                                        Message::CopyText,
-                                        self.zoom,
-                                    ));
-                                }
-                            }
-                            model::SegmentKind::Reasoning => {
-                                if !segment.text.trim().is_empty() {
-                                    let reasoning = column::with_children(vec![
-                                        text("Reasoning")
-                                            .size(self.em(0.76))
-                                            .class(cosmic::theme::Text::Color(
-                                                palette::current().reasoning_text,
-                                            ))
-                                            .into(),
-                                        text(segment.text.trim())
-                                            .size(self.em(0.92))
-                                            .class(cosmic::theme::Text::Color(
-                                                palette::current().reasoning_text,
-                                            ))
-                                            .into(),
-                                    ])
-                                    .spacing(self.space(0.3));
-
-                                    turn_items.push(reasoning.into());
-                                }
-                            }
-                            model::SegmentKind::Tool => {
-                                let (name, status, command, output) = if let Some(tool) =
-                                    &segment.tool
-                                {
-                                    let (status_text, command_text, out_text) = match &tool.state {
-                                        protocol::ToolState::Completed {
-                                            input, content, ..
-                                        } => {
-                                            let cmd = input
-                                                .get("command")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or(&segment.text);
-                                            let out = content.first().and_then(|c| match c {
-                                                protocol::ToolContent::Text { text } => {
-                                                    Some(text.as_str())
-                                                }
-                                                _ => None,
-                                            });
-                                            ("COMPLETED", cmd, out)
-                                        }
-                                        protocol::ToolState::Running { input, .. } => {
-                                            let cmd = input
-                                                .get("command")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or(&segment.text);
-                                            ("RUNNING", cmd, None)
-                                        }
-                                        protocol::ToolState::Error { input, .. } => {
-                                            let cmd = input
-                                                .get("command")
-                                                .and_then(|v| v.as_str())
-                                                .unwrap_or(&segment.text);
-                                            ("ERROR", cmd, None)
-                                        }
-                                        protocol::ToolState::Streaming { .. }
-                                        | protocol::ToolState::Unknown => {
-                                            ("PENDING", segment.text.as_str(), None)
-                                        }
-                                    };
-                                    (tool.name.as_str(), status_text, command_text, out_text)
-                                } else {
-                                    ("tool", "COMPLETED", segment.text.as_str(), None)
-                                };
-
-                                let tool_radius = self.space(0.59);
-                                let mut tool_box_items = vec![
-                                    text(format!("{} · {}", name, status.to_lowercase()))
-                                        .size(self.em(0.76))
-                                        .class(cosmic::theme::Text::Color(
-                                            palette::current().muted_text,
-                                        ))
-                                        .into(),
-                                    text(command)
-                                        .font(cosmic::iced::Font::MONOSPACE)
-                                        .size(self.em(0.92))
-                                        .class(cosmic::theme::Text::Color(
-                                            palette::current().code_content_text,
-                                        ))
-                                        .into(),
-                                ];
-
-                                if let Some(out) = output {
-                                    tool_box_items.push(
-                                        container(
-                                            text(out)
-                                                .font(cosmic::iced::Font::MONOSPACE)
-                                                .size(self.em(0.92))
-                                                .class(cosmic::theme::Text::Color(
-                                                    palette::current().code_content_text,
-                                                )),
-                                        )
-                                        .padding([self.space(0.52) as u16, self.space(0.74) as u16])
-                                        .width(Length::Fill)
-                                        .style(move |_theme: &cosmic::Theme| container::Style {
-                                            background: Some(
-                                                palette::current().code_block_bg.into(),
-                                            ),
-                                            border: Border {
-                                                color: palette::current().code_block_border,
-                                                width: 1.0,
-                                                radius: tool_radius.into(),
-                                            },
-                                            ..Default::default()
-                                        })
-                                        .into(),
-                                    );
-                                }
-
-                                let tool_block =
-                                    column::with_children(tool_box_items).spacing(self.space(0.3));
-
-                                turn_items.push(tool_block.into());
-                            }
-                            model::SegmentKind::File => {
-                                // GTK rendered inline images (`.message-image`):
-                                // the model exposes them as `image_url`.
-                                let uri = segment
-                                    .image_url
-                                    .as_deref()
-                                    .unwrap_or(segment.text.as_str());
-                                if let Some(bytes) = inline_image_bytes(uri) {
-                                    let radius = self.space(0.59);
-                                    let handle =
-                                        cosmic::iced::widget::image::Handle::from_bytes(bytes);
-                                    turn_items.push(
-                                        container(
-                                            cosmic::iced::widget::image(handle)
-                                                .content_fit(cosmic::iced::ContentFit::Contain)
-                                                .width(Length::Fixed(
-                                                    self.space(crate::metrics::px(360.0)),
-                                                )),
-                                        )
-                                        .style(move |_theme: &cosmic::Theme| container::Style {
-                                            border: Border {
-                                                color: palette::current().message_border,
-                                                width: 1.0,
-                                                radius: radius.into(),
-                                            },
-                                            ..Default::default()
-                                        })
-                                        .into(),
-                                    );
-                                } else {
-                                    turn_items.push(text(&segment.text).size(self.em(0.92)).into());
-                                }
-                            }
+                    // GTK rendered one widget per transcript row: a message is
+                    // split at every reasoning and tool segment, and each row
+                    // carries its own header, timestamp and styling.
+                    for row in message.rows() {
+                        if row.body.trim().is_empty() && row.images.is_empty() {
+                            // Keep a zero-height node: dropping a sibling above
+                            // a stateful widget makes iced re-match the tree and
+                            // drop the following widgets' state.
+                            message_elements.push(
+                                container(
+                                    column::with_children(Vec::<Element<'_, Message>>::new()),
+                                )
+                                .height(Length::Fixed(0.0))
+                                .into(),
+                            );
+                            continue;
                         }
-                    }
-
-                    if let Some(error) = message.error() {
-                        // GTK `.message-error-card`: tinted background, 1px
-                        // border, a 4px accent bar on the left, a bold header
-                        // and a softer body.
-                        let accent =
-                            container(row::with_children(Vec::<Element<'_, Message>>::new()))
-                                .width(Length::Fixed(4.0))
-                                .height(Length::Fill)
-                                .style(|_theme: &cosmic::Theme| container::Style {
-                                    background: Some(palette::current().error_text.into()),
-                                    ..Default::default()
-                                });
-
-                        let body = column::with_children(vec![
-                            text("⚠ Error")
-                                .size(self.em(0.88))
+                        let is_user = row.role == Role::User;
+                        let reasoning = row.kind == model::TranscriptRowKind::Reasoning;
+                        // GTK's `.message-reasoning { opacity: 0.42 }` dims the
+                        // whole row, header included.
+                        let dim = move |color: cosmic::iced::Color| {
+                            if reasoning {
+                                cosmic::iced::Color::from_rgba(color.r, color.g, color.b, 0.42)
+                            } else {
+                                color
+                            }
+                        };
+                        let role_color = dim(if is_user {
+                            palette::current().user_role_text
+                        } else {
+                            palette::current().muted_text
+                        });
+                        let header_row = row::with_children(vec![
+                            text(if is_user { "YOU" } else { "AGENT" })
+                                .size(self.em(0.76))
+                                .line_height(line_height(1.35))
                                 .font(cosmic::iced::Font {
                                     weight: cosmic::iced::font::Weight::Bold,
                                     ..cosmic::iced::Font::DEFAULT
                                 })
-                                .class(cosmic::theme::Text::Color(palette::current().error_text))
+                                .class(cosmic::theme::Text::Color(role_color))
+                                .width(Length::Fill)
                                 .into(),
-                            text(error)
-                                .size(self.em(0.92))
+                            text(clock_time(row.time))
+                                .size(self.em(0.76))
+                                .line_height(line_height(1.35))
                                 .class(cosmic::theme::Text::Color(
-                                    palette::current().error_body_text,
+                                    dim(palette::current().time_text),
                                 ))
                                 .into(),
                         ])
-                        .spacing(self.space(0.3))
-                        .width(Length::Fill);
+                        .align_y(Alignment::Center);
 
-                        let card_radius = self.space(0.44);
-                        let card = container(
-                            row::with_children(vec![accent.into(), body.into()])
-                                .spacing(self.space(1.04))
-                                .align_y(Alignment::Start),
-                        )
-                        .padding(0)
-                        .width(Length::Fill)
-                        .style(move |_theme: &cosmic::Theme| container::Style {
-                            background: Some(palette::current().error_card_bg.into()),
-                            border: Border {
-                                color: palette::current().error_card_border,
-                                width: 1.0,
-                                radius: card_radius.into(),
-                            },
-                            ..Default::default()
-                        });
-
-                        turn_items.push(card.into());
-                    }
-
-                    let turn_col = column::with_children(turn_items).spacing(self.space(0.59));
-
-                    // GTK: `.message-row { padding: 1.33em 2.07em 1.48em }`
-                    // with a hairline bottom border; user turns are full-width
-                    // tinted bands.
-                    let row = container(turn_col)
-                        .padding([
-                            self.space(1.33) as u16,
-                            self.space(2.07) as u16,
-                            self.space(1.48) as u16,
-                            self.space(2.07) as u16,
-                        ])
-                        .width(Length::Fill)
-                        .style(move |_theme: &cosmic::Theme| {
-                            if is_user {
-                                container::Style {
-                                    background: Some(palette::current().user_message_bg.into()),
-                                    ..Default::default()
-                                }
-                            } else {
-                                container::Style::default()
+                        let mut body_items: Vec<Element<'_, Message>> = Vec::new();
+                        match row.kind {
+                            model::TranscriptRowKind::Error => {
+                                // GTK `.message-error-card`.
+                                let accent = container(row::with_children(Vec::<
+                                    Element<'_, Message>,
+                                >::new(
+                                )))
+                                .width(Length::Fixed(4.0))
+                                .height(Length::Fill)
+                                .style(
+                                    |_theme: &cosmic::Theme| container::Style {
+                                        background: Some(palette::current().error_text.into()),
+                                        ..Default::default()
+                                    },
+                                );
+                                let card_body = column::with_children(vec![
+                                    row::with_children(vec![
+                                        text("⚠")
+                                            .size(self.em(0.88))
+                                            .class(cosmic::theme::Text::Color(
+                                                palette::current().error_text,
+                                            ))
+                                            .into(),
+                                        text("Error")
+                                            .size(self.em(0.88))
+                                            .font(cosmic::iced::Font {
+                                                weight: cosmic::iced::font::Weight::Bold,
+                                                ..cosmic::iced::Font::DEFAULT
+                                            })
+                                            .class(cosmic::theme::Text::Color(
+                                                palette::current().error_text,
+                                            ))
+                                            .into(),
+                                    ])
+                                    .spacing(self.space(0.44))
+                                    .align_y(Alignment::Center)
+                                    .into(),
+                                    text(row.body.clone())
+                                        .size(self.em(0.92))
+                                        .line_height(line_height(1.4))
+                                        .class(cosmic::theme::Text::Color(
+                                            palette::current().error_body_text,
+                                        ))
+                                        .width(Length::Fill)
+                                        .into(),
+                                ])
+                                .spacing(self.space(0.3))
+                                .width(Length::Fill);
+                                let card_radius = self.space(0.44);
+                                body_items.push(
+                                    container(
+                                        row::with_children(vec![accent.into(), card_body.into()])
+                                            .spacing(self.space(1.04))
+                                            .align_y(Alignment::Start),
+                                    )
+                                    .padding([self.space(0.89) as u16, self.space(1.04) as u16])
+                                    .width(Length::Fill)
+                                    .style(move |_theme: &cosmic::Theme| container::Style {
+                                        background: Some(palette::current().error_card_bg.into()),
+                                        border: Border {
+                                            color: palette::current().error_card_border,
+                                            width: 1.0,
+                                            radius: card_radius.into(),
+                                        },
+                                        ..Default::default()
+                                    })
+                                    .into(),
+                                );
                             }
-                        });
+                            _ if is_user => {
+                                // GTK rendered user bodies as plain text; each
+                                // blank-line-separated part becomes its own
+                                // block (iced's text widget renders a newline as
+                                // a line break in the same paragraph, which GTK
+                                // showed as a paragraph gap).
+                                for block in row.body.split("\n\n") {
+                                    if block.trim().is_empty() {
+                                        continue;
+                                    }
+                                    body_items.push(
+                                        text(block.to_string())
+                                            .size(self.em(0.96))
+                                            .line_height(line_height(1.45))
+                                            .class(cosmic::theme::Text::Color(dim(
+                                                palette::current().content_text,
+                                            )))
+                                            .width(Length::Fill)
+                                            .into(),
+                                    );
+                                }
+                            }
+                            _ => {
+                                body_items.push(markdown::render_markdown(
+                                    &row.body,
+                                    Message::CopyText,
+                                    self.zoom,
+                                ));
+                            }
+                        }
 
-                    message_elements.push(row.into());
-                    message_elements.push(hairline(palette::current().message_border));
+                        for image in &row.images {
+                            if let Some(bytes) = inline_image_bytes(image) {
+                                let radius = self.space(0.59);
+                                let handle = cosmic::iced::widget::image::Handle::from_bytes(bytes);
+                                body_items.push(
+                                    container(
+                                        cosmic::iced::widget::image(handle).border_radius(radius),
+                                    )
+                                    .style(move |_theme: &cosmic::Theme| container::Style {
+                                        border: Border {
+                                            color: palette::current().message_image_border,
+                                            width: 1.0,
+                                            radius: radius.into(),
+                                        },
+                                        ..Default::default()
+                                    })
+                                    .into(),
+                                );
+                            } else {
+                                body_items.push(
+                                    text(image.clone())
+                                        .size(self.em(0.92))
+                                        .class(cosmic::theme::Text::Color(dim(
+                                            palette::current().content_text
+                                        )))
+                                        .into(),
+                                );
+                            }
+                        }
+
+                        // GTK's row: the header, 6px, then the body's blocks
+                        // 10px apart (`.message-content` spacing).
+                        let body = column::with_children(body_items)
+                            .spacing(self.space(crate::metrics::px(10.0)));
+                        let turn_col = column::with_children(vec![header_row.into(), body.into()])
+                            .spacing(self.space(crate::metrics::px(6.0)));
+
+                        // `.message-row { padding: 1.33em 2.07em 1.48em }`; a
+                        // user row is a full-width band with a
+                        // `@oc_border_user_message` hairline above and below,
+                        // an assistant row has no bottom border at all.
+                        let row_bg = if is_user {
+                            palette::current().user_message_bg
+                        } else {
+                            palette::current().window_bg
+                        };
+                        let row = container(turn_col)
+                            .padding([
+                                self.space(1.33) as u16,
+                                self.space(2.07) as u16,
+                                self.space(1.48) as u16,
+                                self.space(2.07) as u16,
+                            ])
+                            .width(Length::Fill)
+                            .style(move |_theme: &cosmic::Theme| container::Style {
+                                background: Some(row_bg.into()),
+                                border: if is_user {
+                                    Border {
+                                        color: palette::current().user_message_border,
+                                        width: 1.0,
+                                        radius: 0.0.into(),
+                                    }
+                                } else {
+                                    Border::default()
+                                },
+                                ..Default::default()
+                            });
+
+                        message_elements.push(row.into());
+                        if is_user {
+                            message_elements.push(hairline(palette::current().user_message_border));
+                        }
+                    }
                 }
             }
 
@@ -1683,40 +1679,61 @@ impl Application for OpenCodeCosmic {
 
             // Anchored to the end: the run stays in view and `snap_to` keeps
             // it there, while an empty transcript has nothing to anchor.
+            // No `anchor_bottom`: iced's anchored offset swallows the
+            // programmatic `snap_to` that follows a running transcript.
             let transcript_scroll = scrollable(message_list)
                 .id(transcript_id())
-                .anchor_bottom()
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .on_scroll(Message::TranscriptScrolled);
 
-            // GTK's `.sticky-message`: the current request stays pinned at the
-            // transcript's top (an overlay with a shadow) once it is scrolled.
-            let transcript_area: Element<'_, Message> = match self.sticky_prompt() {
-                None => transcript_scroll.into(),
-                Some((_id, prompt_text)) => {
+            // GTK's `.sticky-message`: a copy of the user row — role and
+            // time, then the wrapped body — pinned over the transcript's top
+            // with a `@oc_border_sticky_message` hairline and a 0/4/12 shadow.
+            //
+            // The node stays in the tree even when there is nothing to pin:
+            // swapping the whole scrollable for a stack (and back) would make
+            // iced re-match the tree and drop the scrollable's state.
+            let sticky_node: Element<'_, Message> = match self.sticky_prompt() {
+                None => container(column::with_children(Vec::<Element<'_, Message>>::new()))
+                    .height(Length::Fixed(0.0))
+                    .into(),
+                Some((_id, prompt_text, created)) => {
                     let sticky = container(
-                        row::with_children(vec![
-                            text("YOU")
-                                .size(self.em(0.76))
-                                .font(cosmic::iced::Font {
-                                    weight: cosmic::iced::font::Weight::Bold,
-                                    ..cosmic::iced::Font::DEFAULT
-                                })
-                                .class(cosmic::theme::Text::Color(
-                                    palette::current().user_role_text,
-                                ))
-                                .into(),
+                        column::with_children(vec![
+                            row::with_children(vec![
+                                text("YOU")
+                                    .size(self.em(0.76))
+                                    .font(cosmic::iced::Font {
+                                        weight: cosmic::iced::font::Weight::Bold,
+                                        ..cosmic::iced::Font::DEFAULT
+                                    })
+                                    .class(cosmic::theme::Text::Color(
+                                        palette::current().user_role_text,
+                                    ))
+                                    .width(Length::Fill)
+                                    .into(),
+                                text(clock_time(created))
+                                    .size(self.em(0.76))
+                                    .class(cosmic::theme::Text::Color(palette::current().time_text))
+                                    .into(),
+                            ])
+                            .align_y(Alignment::Center)
+                            .into(),
                             text(prompt_text)
                                 .size(self.em(0.96))
                                 .class(cosmic::theme::Text::Color(palette::current().content_text))
                                 .width(Length::Fill)
                                 .into(),
                         ])
-                        .spacing(self.space(0.59))
-                        .align_y(Alignment::Center),
+                        .spacing(self.space(crate::metrics::px(6.0))),
                     )
-                    .padding([self.space(0.59) as u16, self.space(2.07) as u16])
+                    .padding([
+                        self.space(1.33) as u16,
+                        self.space(2.07) as u16,
+                        self.space(1.48) as u16,
+                        self.space(2.07) as u16,
+                    ])
                     .width(Length::Fill)
                     .style(move |_theme: &cosmic::Theme| container::Style {
                         background: Some(palette::current().window_bg.into()),
@@ -1725,17 +1742,24 @@ impl Application for OpenCodeCosmic {
                             width: 1.0,
                             radius: 0.0.into(),
                         },
+                        shadow: cosmic::iced::Shadow {
+                            color: palette::current().sticky_shadow,
+                            offset: cosmic::iced::Vector::new(0.0, 4.0),
+                            blur_radius: 12.0,
+                        },
                         ..Default::default()
                     });
 
-                    cosmic::iced::widget::Stack::new()
-                        .width(Length::Fill)
-                        .height(Length::Fill)
-                        .push(transcript_scroll)
-                        .push(container(sticky).align_top(Length::Fill))
-                        .into()
+                    container(sticky).align_top(Length::Fill).into()
                 }
             };
+
+            let transcript_area: Element<'_, Message> = cosmic::iced::widget::Stack::new()
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .push(transcript_scroll)
+                .push(sticky_node)
+                .into();
 
             main_items.push(transcript_area);
 
@@ -1767,33 +1791,35 @@ impl Application for OpenCodeCosmic {
                             .class(cosmic::theme::Text::Color(
                                 palette::current().prompt_subheading,
                             ))
+                            .width(Length::Fill)
                             .into(),
                     ];
-                    match notice.cancel {
-                        Some(target) => {
-                            items.push(
-                                text(crate::pending::CANCEL_FORM_SHORTCUT)
-                                    .size(self.em(0.82))
-                                    .class(cosmic::theme::Text::Color(
-                                        palette::current().prompt_metadata,
-                                    ))
-                                    .into(),
-                            );
-                            let _ = target;
-                            items.push(tray_text_button(
-                                "Cancel",
-                                self.zoom,
-                                Message::CancelVisibleForm,
-                            ));
-                        }
-                        None => items.push(
-                            text(notice.tooltip)
-                                .size(self.em(0.82))
-                                .class(cosmic::theme::Text::Color(
-                                    palette::current().prompt_metadata,
-                                ))
-                                .into(),
-                        ),
+                    // GTK: a flat "Open web UI" beside a plain bordered
+                    // "Cancel" (the shortcut lives in its tooltip, not in the
+                    // row).
+                    items.push(
+                        button::custom(hinted(
+                            text("Open web UI").size(self.em(0.96)),
+                            "Answer it in the server's web UI",
+                        ))
+                        .class(flat_button_class(self.zoom))
+                        .on_press(Message::OpenWebUi)
+                        .padding([self.space(0.67) as u16, self.space(1.23) as u16])
+                        .into(),
+                    );
+                    if notice.cancel.is_some() {
+                        items.push(
+                            button::custom(hinted(
+                                text("Cancel").size(self.em(0.96)),
+                                format!(
+                                    "Cancel this form ({})",
+                                    crate::pending::CANCEL_FORM_SHORTCUT
+                                ),
+                            ))
+                            .on_press(Message::CancelVisibleForm)
+                            .padding([self.space(0.67) as u16, self.space(1.23) as u16])
+                            .into(),
+                        );
                     }
                     container(
                         row::with_children(items)
@@ -2179,12 +2205,24 @@ impl Application for OpenCodeCosmic {
             );
 
             composer_items.push(
-                text_input("Ask OpenCode...", &self.composer_text)
+                // GTK's `.composer-input`: a text view with a 72px minimum
+                // height and 10/12px margins.
+                cosmic::iced::widget::text_editor(&self.composer_editor)
                     .id(composer_id())
-                    .on_input(Message::ComposerInput)
-                    // Enter / Ctrl+Enter are handled by the key subscription (see `shortcut`),
-                    // so the widget must not also submit on Enter.
-                    .width(Length::Fill)
+                    .on_action(Message::ComposerEdit)
+                    .padding([10, 12])
+                    .height(Length::Fixed(72.0))
+                    // GTK's `.composer-input` is transparent inside the
+                    // composer frame, which draws the border itself.
+                    .style(|_theme, _status| cosmic::iced::widget::text_editor::Style {
+                        background: cosmic::iced::Background::Color(
+                            cosmic::iced::Color::TRANSPARENT,
+                        ),
+                        border: cosmic::iced::Border::default(),
+                        placeholder: palette::current().muted_text,
+                        value: palette::current().content_text,
+                        selection: palette::current().user_message_bg,
+                    })
                     .into(),
             );
 
@@ -2367,7 +2405,7 @@ impl Application for OpenCodeCosmic {
                 }
                 // GTK showed each row's shortcut number while Alt was held.
                 Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
-                    Some(Message::AltHint(modifiers.alt()))
+                    Some(Message::ModifiersChanged(modifiers))
                 }
                 // A row's press must not rebuild it (the drag state lives in
                 // the widget), so selection and the drop both happen here: the
@@ -2421,7 +2459,10 @@ fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Message> {
 
     match key {
         Key::Named(Named::F2) => Some(Message::OpenRename),
-        Key::Named(Named::Enter) => Some(Message::ComposerEnter { ctrl: false }),
+        // Shift+Enter is the editor's newline.
+        Key::Named(Named::Enter) if !modifiers.shift() => {
+            Some(Message::ComposerEnter { ctrl: false })
+        }
         Key::Named(Named::Escape) => Some(Message::CloseDrawer),
         _ => None,
     }
@@ -2460,6 +2501,13 @@ fn transcript_id() -> cosmic::widget::Id {
     cosmic::widget::Id::new("opencode-transcript")
 }
 
+/// Puts the caret in the prompt composer (its editor has no `focus` helper).
+fn focus_composer() -> Task<Message> {
+    cosmic::iced::advanced::widget::operate(
+        cosmic::iced::advanced::widget::operation::focusable::focus(composer_id()),
+    )
+}
+
 /// Widget id of the prompt composer, so a `Task` can put the caret in it.
 fn composer_id() -> cosmic::widget::Id {
     cosmic::widget::Id::new("opencode-composer")
@@ -2486,6 +2534,12 @@ fn inline_image_bytes(uri: &str) -> Option<Vec<u8>> {
 
 /// GTK's `.session-tab-action`: dimmed to `opacity: 0.45` until the row is
 /// active or hovered.
+/// GTK's transcript line heights (`.message-content` 1.35, plain paragraphs
+/// 1.45, the error card's body 1.4).
+fn line_height(factor: f32) -> cosmic::iced::core::text::LineHeight {
+    cosmic::iced::core::text::LineHeight::Relative(factor)
+}
+
 fn tab_action_class(shown: bool, radius: f32) -> cosmic::theme::Button {
     let base = move || cosmic::widget::button::Style {
         background: None,
@@ -2660,7 +2714,8 @@ fn menu_chevron(zoom: f32) -> Element<'static, Message> {
 /// GTK's suggested action (`.composer-action.suggested-action`): the client's
 /// amber, not the COSMIC theme accent.
 fn accent_button_class(zoom: f32) -> cosmic::theme::Button {
-    let radius = crate::metrics::space(0.59, zoom);
+    // GTK's `.composer-action.suggested-action`: a circle on a 2.52em button.
+    let radius = crate::metrics::space(999.0, zoom);
     let base = move || cosmic::widget::button::Style {
         background: Some(palette::current().accent_bg.into()),
         border_radius: radius.into(),
@@ -4011,6 +4066,7 @@ impl OpenCodeCosmic {
         };
 
         let prompt = std::mem::take(&mut self.composer_text);
+        self.composer_editor = cosmic::widget::text_editor::Content::new();
         let attachments = std::mem::take(&mut self.pending_attachments);
         let req_id = self.next_request_id();
         let msg_id = format!("msg_{}", req_id);
@@ -4058,7 +4114,7 @@ impl OpenCodeCosmic {
     fn load_older_history(&mut self) {
         // A little slack so the next page is there when the user arrives,
         // instead of after a visible pause.
-        if self.transcript_from_top > 24.0 || self.history_loading {
+        if self.transcript_offset > 24.0 || self.history_loading {
             return;
         }
         let Some(active_id) = self.active_session_id.clone() else {
@@ -4089,7 +4145,12 @@ impl OpenCodeCosmic {
     /// The current turn's request, for GTK's sticky prompt: pinned once its own
     /// row has left the top of the transcript (the answer started), or while
     /// the reader has scrolled back up through a long one.
-    fn sticky_prompt(&self) -> Option<(String, String)> {
+    fn sticky_prompt(&self) -> Option<(String, String, u64)> {
+        // GTK hid the pinned prompt while the viewport sat at the top of the
+        // transcript (`adjustment_at_top`).
+        if self.transcript_offset <= 8.0 {
+            return None;
+        }
         let conversation = self
             .active_session_id
             .as_ref()
@@ -4103,18 +4164,24 @@ impl OpenCodeCosmic {
             .iter()
             .skip(index + 1)
             .any(|message| message.role == model::Role::Assistant);
-        if !(has_answer && self.transcript_from_top > 8.0) && self.transcript_from_bottom <= 40.0 {
+        if !(has_answer && self.transcript_offset > 8.0) && self.transcript_remaining <= 40.0 {
             return None;
         }
         let message = &conversation.messages[index];
         let text = message
             .segments()
             .iter()
-            .filter(|segment| segment.kind == model::SegmentKind::Text)
+            .filter(|segment| {
+                matches!(
+                    segment.kind,
+                    model::SegmentKind::Text | model::SegmentKind::File
+                )
+            })
             .map(|segment| segment.text.as_str())
+            .filter(|text| !text.trim().is_empty())
             .collect::<Vec<_>>()
-            .join(" ");
-        (!text.trim().is_empty()).then(|| (message.id.clone(), text))
+            .join("\n\n");
+        (!text.trim().is_empty()).then(|| (message.id.clone(), text, message.created))
     }
 
     /// Adds a pending request, replacing a known one of the same id.
@@ -4156,6 +4223,20 @@ impl OpenCodeCosmic {
                     .map(|parent| (id.clone(), parent.clone()))
             })
             .collect()
+    }
+
+    /// GTK's `open_web_ui`: the server's web UI in the default browser.
+    fn open_web_ui(&mut self) {
+        match crate::api::web_ui_url(&self.state.connection.server) {
+            Ok(uri) => {
+                if let Err(error) = std::process::Command::new("xdg-open").arg(&uri).spawn() {
+                    self.error_banner = Some(format!("Could not open {uri}: {error}"));
+                }
+            }
+            Err(error) => {
+                self.error_banner = Some(format!("Could not open the web UI: {error:#}"));
+            }
+        }
     }
 
     /// GTK's form notice (`.form-notice`), which `Ctrl+Shift+X` cancels.
