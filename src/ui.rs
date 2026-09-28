@@ -417,20 +417,10 @@ impl Application for OpenCodeCosmic {
             {
                 app.handle_ui_event(event);
             }
-            app.projects = vec![
-                model::Project {
-                    worktree: "/repo".to_string(),
-                    name: Some("opencode".to_string()),
-                },
-                model::Project {
-                    worktree: "/state/workspace".to_string(),
-                    name: Some("workspace".to_string()),
-                },
-                model::Project {
-                    worktree: "/state/other".to_string(),
-                    name: Some("other".to_string()),
-                },
-            ];
+            // GTK's preview seeds no projects: its new-session picker lists
+            // `project_paths(state.projects, state.sessions)`, which for the
+            // fixture is the sessions' own `/repo` alone. Seeding extra
+            // locations here made the picker show rows GTK's never has.
 
             // Preview mode is the screenshot/demo surface: show the paperclip
             // chips without a real dialog. Off by default so the preview's
@@ -2291,9 +2281,14 @@ impl Application for OpenCodeCosmic {
                 // the hint keeps its distance from the counter next to it.
                 status_items.push(
                     container(
-                        text("Ctrl + Enter to queue")
-                            .size(self.em(0.82))
-                            .class(cosmic::theme::Text::Color(palette::current().muted_text)),
+                        row::with_children(vec![
+                            keycap("Ctrl", self.zoom),
+                            muted_hint("+", self.zoom),
+                            keycap("Enter", self.zoom),
+                            muted_hint("to queue", self.zoom),
+                        ])
+                        .spacing(self.space(0.3))
+                        .align_y(Alignment::Center),
                     )
                     .padding([0, self.space(1.19) as u16, 0, self.space(1.19) as u16])
                     .into(),
@@ -2965,7 +2960,11 @@ fn field_input_class() -> cosmic::theme::TextInput {
             border_radius: 4.0.into(),
             border_offset: None,
             border_width: 1.0,
-            border_color: if focused { p.accent_bg } else { p.modal_border },
+            border_color: if focused {
+                p.field_focus_border
+            } else {
+                p.modal_border
+            },
             label_color: p.muted_text,
             placeholder_color: p.prompt_metadata,
             selected_text_color: p.content_text,
@@ -3054,6 +3053,78 @@ fn muted_hint<'a>(label: &'a str, zoom: f32) -> Element<'a, Message> {
         .size(crate::metrics::em(0.82, zoom))
         .class(cosmic::theme::Text::Color(palette::current().muted_text))
         .into()
+}
+
+/// GTK's `fuzzy_score` (ui.rs:939): subsequence match with bonuses for
+/// adjacency, word starts and a contiguous run, used by every picker.
+fn fuzzy_score(query: &str, target: &str) -> Option<i64> {
+    if query.is_empty() {
+        return Some(0);
+    }
+    let q_lower: Vec<char> = query.to_lowercase().chars().collect();
+    let t_lower: Vec<char> = target.to_lowercase().chars().collect();
+    let original: Vec<char> = target.chars().collect();
+    let mut q_idx = 0;
+    let mut score: i64 = 0;
+    let mut prev_match_idx: Option<usize> = None;
+    let mut first_match_idx: Option<usize> = None;
+    for (t_idx, &t_ch) in t_lower.iter().enumerate() {
+        if q_idx < q_lower.len() && t_ch == q_lower[q_idx] {
+            if first_match_idx.is_none() {
+                first_match_idx = Some(t_idx);
+            }
+            score += 10;
+            if let Some(prev) = prev_match_idx
+                && prev + 1 == t_idx
+            {
+                score += 15;
+            }
+            if t_idx == 0 {
+                score += 30;
+            } else {
+                let prev_ch = original[t_idx - 1];
+                if matches!(prev_ch, ' ' | '-' | '_' | '/' | '.' | ':') {
+                    score += 25;
+                } else if prev_ch.is_lowercase() && original[t_idx].is_uppercase() {
+                    score += 20;
+                }
+            }
+            prev_match_idx = Some(t_idx);
+            q_idx += 1;
+        }
+    }
+    if q_idx < q_lower.len() {
+        return None;
+    }
+    let t_str = target.to_lowercase();
+    let q_str = query.to_lowercase();
+    if let Some(idx) = t_str.find(&q_str) {
+        score += 50;
+        if idx == 0 {
+            score += 25;
+        }
+    }
+    if let (Some(first), Some(last)) = (first_match_idx, prev_match_idx) {
+        score -= last.saturating_sub(first) as i64;
+    }
+    Some(score - (t_lower.len() as i64) / 4)
+}
+
+/// GTK's `project_paths` (ui.rs:9115): project worktrees then session
+/// directories, deduplicated in that order.
+fn project_paths(projects: &[model::Project], sessions: &[&model::Session]) -> Vec<String> {
+    let mut paths: Vec<String> = Vec::new();
+    for project in projects {
+        if !paths.contains(&project.worktree) {
+            paths.push(project.worktree.clone());
+        }
+    }
+    for session in sessions {
+        if !paths.contains(&session.directory) {
+            paths.push(session.directory.clone());
+        }
+    }
+    paths
 }
 
 /// GTK's `button.session-picker-row`: white fill, 1px border and a
@@ -3854,16 +3925,49 @@ impl OpenCodeCosmic {
 
     /// GTK's new-session palette: search over the known locations.
     fn new_session_palette(&self) -> Element<'_, Message> {
-        let query = self.search_query.to_lowercase();
+        let query = self.search_query.clone();
         let mut rows: Vec<Element<'_, Message>> = Vec::new();
 
-        for (index, project) in self.filtered_projects(&query).into_iter().enumerate() {
+        // GTK's picker lists `project_paths`, names each by its last path
+        // segment, and orders the active directory first and then by name.
+        let active_dir = self
+            .active_session_id
+            .as_ref()
+            .and_then(|id| self.sessions.get(id))
+            .map(|session| session.directory.clone());
+        let session_refs: Vec<&model::Session> = self.sessions.values().collect();
+        let mut candidates: Vec<(i64, String, String)> = Vec::new();
+        for path in project_paths(&self.projects, &session_refs) {
+            let name = path
+                .rsplit('/')
+                .next()
+                .filter(|segment| !segment.is_empty())
+                .unwrap_or(&path)
+                .to_owned();
+            if query.trim().is_empty() {
+                let priority = if active_dir.as_deref() == Some(path.as_str()) {
+                    1000
+                } else {
+                    0
+                };
+                candidates.push((priority, name, path));
+            } else {
+                let name_score = fuzzy_score(&query, &name);
+                let path_score = fuzzy_score(&query, &path);
+                if let Some(score) = match (name_score, path_score) {
+                    (Some(a), Some(b)) => Some(a.max(b)),
+                    (a, b) => a.or(b),
+                } {
+                    candidates.push((score, name, path));
+                }
+            }
+        }
+        candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+
+        for (index, (_, name, path)) in candidates.into_iter().enumerate() {
             let radius = self.space(0.44);
-            let selected = index == 0;
-            let name = project
-                .name
-                .clone()
-                .unwrap_or_else(|| project.worktree.clone());
+            let selected = active_dir.as_deref() == Some(path.as_str())
+                || (index == 0 && active_dir.is_none());
             rows.push(
                 button::custom(
                     row::with_children(vec![
@@ -3880,7 +3984,7 @@ impl OpenCodeCosmic {
                             }))
                             .width(Length::Fill)
                             .into(),
-                        text(project.worktree.clone())
+                        text(path.clone())
                             .size(self.em(0.81))
                             .class(cosmic::theme::Text::Color(if selected {
                                 palette::current().new_session_selected_path_fg
@@ -3895,14 +3999,15 @@ impl OpenCodeCosmic {
                 .padding([self.space(0.52) as u16, self.space(0.74) as u16])
                 .width(Length::Fill)
                 .class(modal_row_class(selected, radius))
-                .on_press(Message::CreateSessionIn(project.worktree.clone()))
+                .on_press(Message::CreateSessionIn(path.clone()))
                 .into(),
             );
         }
 
         if rows.is_empty() {
             rows.push(
-                text("No locations yet — is the server reachable?")
+                // GTK's empty state for the picker.
+                text("No matching projects")
                     .size(self.em(0.92))
                     .class(cosmic::theme::Text::Color(palette::current().muted_text))
                     .into(),

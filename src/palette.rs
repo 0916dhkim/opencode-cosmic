@@ -68,6 +68,9 @@ pub struct Palette {
     pub new_session_selected_path_fg: Color,
     /// `@oc_bg_modal_backdrop`
     pub modal_backdrop: Color,
+    /// GTK's entry focus ring: the system focus blue, not the app accent
+    /// (measured 129,165,211 light and 25,68,121 dark on its own render).
+    pub field_focus_border: Color,
     /// `@oc_bg_settings_rail`
     pub settings_rail_bg: Color,
     /// `@oc_border_settings_rail`
@@ -309,6 +312,7 @@ pub const LIGHT: Palette = Palette {
     new_session_selected_name_fg: Color::from_rgb8(0x11, 0x11, 0x10),
     new_session_selected_path_fg: Color::from_rgb8(0x55, 0x5b, 0x58),
     modal_backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
+    field_focus_border: Color::from_rgb8(0x81, 0xa5, 0xd3),
     settings_rail_bg: Color::from_rgb8(0xf4, 0xf0, 0xe6),
     settings_rail_border: Color::from_rgb8(0xde, 0xd8, 0xcb),
     settings_rail_item_fg: Color::from_rgb8(0x63, 0x6b, 0x74),
@@ -442,6 +446,7 @@ pub const DARK: Palette = Palette {
     new_session_selected_name_fg: Color::from_rgb8(0xff, 0xff, 0xff),
     new_session_selected_path_fg: Color::from_rgb8(0x9b, 0xa5, 0xb2),
     modal_backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.65),
+    field_focus_border: Color::from_rgb8(0x19, 0x44, 0x79),
     settings_rail_bg: Color::from_rgb8(0x11, 0x14, 0x18),
     settings_rail_border: Color::from_rgb8(0x23, 0x29, 0x30),
     settings_rail_item_fg: Color::from_rgb8(0x8b, 0x94, 0x9e),
