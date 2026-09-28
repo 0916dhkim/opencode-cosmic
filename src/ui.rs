@@ -3002,6 +3002,34 @@ fn muted_hint<'a>(label: &'a str, zoom: f32) -> Element<'a, Message> {
         .into()
 }
 
+/// GTK's `button.session-picker-row`: white fill, 1px border and a
+/// `0 1px 3px` shadow, with hover and active token pairs.
+fn session_picker_row_class(active: bool, radius: f32) -> cosmic::theme::Button {
+    let style = move |hovered: bool| {
+        let p = palette::current();
+        // GTK's picker rows are plain ListBox rows: no fill and no border,
+        // the ListBox's own hover/selected fill otherwise.
+        let background = if active {
+            Some(p.picker_row_selected_bg.into())
+        } else if hovered {
+            Some(p.picker_row_hover_bg.into())
+        } else {
+            None
+        };
+        cosmic::widget::button::Style {
+            background,
+            border_radius: radius.into(),
+            ..Default::default()
+        }
+    };
+    cosmic::theme::Button::Custom {
+        active: Box::new(move |_focused, _theme| style(false)),
+        hovered: Box::new(move |_focused, _theme| style(true)),
+        pressed: Box::new(move |_focused, _theme| style(false)),
+        disabled: Box::new(move |_theme| style(false)),
+    }
+}
+
 /// GTK's `button.settings-rail-item`: normal, hover and active token pairs.
 fn settings_rail_item_class(active: bool, radius: f32) -> cosmic::theme::Button {
     let style = move |hovered: bool| {
@@ -3574,6 +3602,8 @@ impl OpenCodeCosmic {
         width: f32,
         height: f32,
         title: Option<&str>,
+        // GTK's `.app-modal-palette.sessions` has its own background and border.
+        sessions_card: bool,
         body: Element<'a, Message>,
     ) -> Element<'a, Message> {
         let radius = self.space(0.89);
@@ -3610,9 +3640,17 @@ impl OpenCodeCosmic {
         )
         .padding(self.space(1.04) as u16)
         .style(move |_theme: &cosmic::Theme| container::Style {
-            background: Some(palette::current().modal_bg.into()),
+            background: Some(if sessions_card {
+                palette::current().sessions_bg.into()
+            } else {
+                palette::current().modal_bg.into()
+            }),
             border: Border {
-                color: palette::current().modal_border,
+                color: if sessions_card {
+                    palette::current().sessions_border
+                } else {
+                    palette::current().modal_border
+                },
                 width: 1.0,
                 radius: radius.into(),
             },
@@ -3624,10 +3662,12 @@ impl OpenCodeCosmic {
 
     /// GTK's session picker: a search field over the session list.
     fn sessions_palette(&self) -> Element<'_, Message> {
+        // GTK sizes this modal's height to its content: 410px rendered.
         self.modal_frame(
             self.space(39.0),
-            self.space(24.0),
+            self.space(30.75),
             None,
+            true,
             self.sessions_palette_body(),
         )
     }
@@ -3660,24 +3700,41 @@ impl OpenCodeCosmic {
         for session in filtered_sessions {
             let radius = self.space(0.44);
             rows.push(
-                button::custom(
-                    row::with_children(vec![
-                        text(session.title.clone())
-                            .size(self.em(0.96))
-                            .width(Length::Fill)
-                            .into(),
-                        text(session.directory.clone())
-                            .size(self.em(0.82))
-                            .class(cosmic::theme::Text::Color(palette::current().muted_text))
-                            .into(),
-                    ])
-                    .align_y(Alignment::Center)
-                    .width(Length::Fill),
+                container(
+                    button::custom(
+                        row::with_children(vec![
+                            text(session.title.clone())
+                                .size(self.em(0.96))
+                                .font(cosmic::iced::Font {
+                                    weight: cosmic::iced::font::Weight::Bold,
+                                    ..cosmic::iced::Font::DEFAULT
+                                })
+                                .class(cosmic::theme::Text::Color(
+                                    palette::current().picker_title_fg,
+                                ))
+                                .width(Length::Fill)
+                                .into(),
+                            text(session.directory.clone())
+                                .size(self.em(0.84))
+                                .class(cosmic::theme::Text::Color(
+                                    palette::current().picker_path_fg,
+                                ))
+                                .into(),
+                        ])
+                        .align_y(Alignment::Center)
+                        .width(Length::Fill),
+                    )
+                    // GTK's `.session-picker-row`: `0.74em 0.89em`.
+                    .padding([self.space(0.74) as u16, self.space(0.89) as u16])
+                    .width(Length::Fill)
+                    .class(session_picker_row_class(
+                        self.active_session_id.as_deref() == Some(session.id.as_str()),
+                        radius,
+                    ))
+                    .on_press(Message::SelectSession(session.id.clone())),
                 )
-                .padding([self.space(0.3) as u16, self.space(0.44) as u16])
-                .width(Length::Fill)
-                .class(modal_row_class(radius))
-                .on_press(Message::SelectSession(session.id.clone()))
+                // GTK: `margin-bottom: 0.44em`.
+                .padding([0, 0, self.space(0.44) as u16, 0])
                 .into(),
             );
         }
@@ -3790,7 +3847,13 @@ impl OpenCodeCosmic {
             .spacing(self.space(0.59))
             .height(Length::Fill);
 
-        self.modal_frame(self.space(26.25), self.space(23.25), None, body.into())
+        self.modal_frame(
+            self.space(26.25),
+            self.space(23.25),
+            None,
+            false,
+            body.into(),
+        )
     }
 
     /// GTK's rename dialog: the title entry plus the session ID with a copy
@@ -3853,7 +3916,13 @@ impl OpenCodeCosmic {
             .spacing(self.space(0.44))
             .height(Length::Fill);
 
-        self.modal_frame(self.space(26.25), self.space(23.25), None, body.into())
+        self.modal_frame(
+            self.space(26.25),
+            self.space(23.25),
+            None,
+            false,
+            body.into(),
+        )
     }
 
     fn settings_palette(&self) -> Element<'_, Message> {

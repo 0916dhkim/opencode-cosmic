@@ -68,6 +68,30 @@ pub struct Palette {
     pub rail_badge_fg: Color,
     /// `@oc_border_settings_topbar`
     pub settings_topbar_border: Color,
+    /// `@oc_bg_app_modal_palette_sessions`
+    pub sessions_bg: Color,
+    /// `@oc_border_app_modal_palette_sessions`
+    pub sessions_border: Color,
+    /// `@oc_bg_button_session_picker_row`
+    pub picker_row_bg: Color,
+    /// `@oc_border_button_session_picker_row`
+    pub picker_row_border: Color,
+    /// `@oc_shadow_button_session_picker_row`
+    pub picker_row_shadow: Color,
+    /// `@oc_bg_session_picker_row_hover`
+    pub picker_row_hover_bg: Color,
+    /// GTK ListBox `:selected` on the picker's plain rows.
+    pub picker_row_selected_bg: Color,
+    /// `@oc_border_button_session_picker_row_hover`
+    pub picker_row_hover_border: Color,
+    /// `@oc_bg_button_session_picker_row_active`
+    pub picker_row_active_bg: Color,
+    /// `@oc_border_button_session_picker_row_active`
+    pub picker_row_active_border: Color,
+    /// `@oc_fg_session_picker_title`
+    pub picker_title_fg: Color,
+    /// `@oc_fg_session_picker_path`
+    pub picker_path_fg: Color,
     /// `@oc_bg_queue_tray`
     pub tray_bg: Color,
     /// `@oc_border_queue_tray`
@@ -267,6 +291,18 @@ pub const LIGHT: Palette = Palette {
     settings_rail_item_active_fg: Color::from_rgb8(0x11, 0x11, 0x10),
     rail_badge_fg: Color::from_rgb8(0x8b, 0x92, 0x9a),
     settings_topbar_border: Color::from_rgb8(0xde, 0xd8, 0xcb),
+    sessions_bg: Color::from_rgb8(0xff, 0xff, 0xff),
+    sessions_border: Color::from_rgb8(0xd5, 0xd0, 0xc7),
+    picker_row_bg: Color::from_rgb8(0xff, 0xff, 0xff),
+    picker_row_border: Color::from_rgb8(0xde, 0xd8, 0xcc),
+    picker_row_shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.04),
+    picker_row_hover_bg: Color::from_rgb8(0xe7, 0xe4, 0xde),
+    picker_row_selected_bg: Color::from_rgb8(0xed, 0xed, 0xed),
+    picker_row_hover_border: Color::from_rgb8(0xcb, 0xbe, 0xae),
+    picker_row_active_bg: Color::from_rgb8(0xf4, 0xee, 0xe2),
+    picker_row_active_border: Color::from_rgb8(0xc4, 0xb6, 0xa4),
+    picker_title_fg: Color::from_rgb8(0x27, 0x25, 0x22),
+    picker_path_fg: Color::from_rgb8(0x73, 0x78, 0x75),
     tray_bg: Color::from_rgb8(0xf0, 0xee, 0xe9),
     tray_border: Color::from_rgb8(0xcb, 0xc7, 0xbf),
     composer_bg: Color::from_rgb8(0xff, 0xff, 0xff),
@@ -379,6 +415,18 @@ pub const DARK: Palette = Palette {
     settings_rail_item_active_fg: Color::from_rgb8(0xed, 0xf1, 0xf5),
     rail_badge_fg: Color::from_rgb8(0x6a, 0x74, 0x82),
     settings_topbar_border: Color::from_rgb8(0x23, 0x29, 0x30),
+    sessions_bg: Color::from_rgb8(0x18, 0x18, 0x1b),
+    sessions_border: Color::from_rgb8(0x27, 0x27, 0x2a),
+    picker_row_bg: Color::from_rgb8(0x1a, 0x1f, 0x26),
+    picker_row_border: Color::from_rgb8(0x24, 0x2a, 0x34),
+    picker_row_shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
+    picker_row_hover_bg: Color::from_rgb8(0x20, 0x24, 0x28),
+    picker_row_selected_bg: Color::from_rgba(1.0, 1.0, 1.0, 0.1),
+    picker_row_hover_border: Color::from_rgb8(0x31, 0x3a, 0x48),
+    picker_row_active_bg: Color::from_rgb8(0x22, 0x2b, 0x38),
+    picker_row_active_border: Color::from_rgb8(0x3c, 0x4a, 0x5f),
+    picker_title_fg: Color::from_rgb8(0xee, 0xeb, 0xe5),
+    picker_path_fg: Color::from_rgb8(0x7f, 0x87, 0x8e),
     tray_bg: Color::from_rgb8(0x15, 0x18, 0x1b),
     tray_border: Color::from_rgb8(0x2d, 0x32, 0x36),
     composer_bg: Color::from_rgb8(0x19, 0x1c, 0x1f),
