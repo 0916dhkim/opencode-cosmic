@@ -1953,6 +1953,9 @@ impl Application for OpenCodeCosmic {
                         // at the inherited 1em (13.33px), not a reduced one.
                         text(notice.text)
                             .size(self.em(1.0))
+                            // `.form-notice-label` sets no line-height, so GTK
+                            // renders it at the font's natural height.
+                            .line_height(line_height(1.0))
                             .font(cosmic::iced::Font {
                                 weight: cosmic::iced::font::Weight::Bold,
                                 ..cosmic::iced::Font::DEFAULT
@@ -2015,13 +2018,16 @@ impl Application for OpenCodeCosmic {
                         ..Default::default()
                     });
                     // GTK's notice box carried `margin-start/end: 18` and
-                    // `margin-bottom: 8`.
-                    // GTK's notice box carried `margin-start/end: 18` and
-                    // `margin-bottom: 8`; the composer block's own 8px top
-                    // padding stands in for that margin, so the gap below the
-                    // notice is 8px, not 16.
+                    // `margin-bottom: 8`. The margin is the notice's own: with
+                    // a tray below it the 8px sits between them (the composer's
+                    // 8px top padding is gone).
                     container(padded)
-                        .padding([0.0_f32, self.space(1.35), 0.0, self.space(1.35)])
+                        .padding([
+                            0.0_f32,
+                            self.space(1.35),
+                            self.space(0.59),
+                            self.space(1.35),
+                        ])
                         .into()
                 }
             };
@@ -2120,6 +2126,7 @@ impl Application for OpenCodeCosmic {
                             container(
                                 text(label)
                                     .size(self.em(0.72))
+                                    .line_height(line_height(1.0))
                                     .font(cosmic::iced::Font {
                                         weight: cosmic::iced::font::Weight::Bold,
                                         ..cosmic::iced::Font::DEFAULT
@@ -2157,14 +2164,20 @@ impl Application for OpenCodeCosmic {
                         )
                     };
 
-                    let badge_radius = self.space(0.44);
-                    let badge = container(text(delivery_label).size(self.em(0.72)).font(
-                        cosmic::iced::Font {
-                            weight: cosmic::iced::font::Weight::Bold,
-                            ..cosmic::iced::Font::DEFAULT
-                        },
-                    ))
-                    .padding([self.space(0.15) as u16, self.space(0.44) as u16])
+                    // GTK's `.session-badge`: 0.74em/700, padding
+                    // `0.15em 0.52em` and radius 0.3em. Its 0.04em
+                    // letter-spacing has no iced counterpart on text.
+                    let badge_radius = self.space(0.3);
+                    let badge = container(
+                        text(delivery_label)
+                            .size(self.em(0.74))
+                            .line_height(line_height(1.0))
+                            .font(cosmic::iced::Font {
+                                weight: cosmic::iced::font::Weight::Bold,
+                                ..cosmic::iced::Font::DEFAULT
+                            }),
+                    )
+                    .padding([self.space(0.15) as u16, self.space(0.52) as u16])
                     .style(move |_theme: &cosmic::Theme| container::Style {
                         background: Some(badge_bg.into()),
                         border: Border {
@@ -2486,8 +2499,10 @@ impl Application for OpenCodeCosmic {
             // GTK's composer stack carries 18px side margins and 16px at the
             // bottom; the top gap below the notice is the composer box's own
             // padding.
+            // The gap above the composer comes from the notice's own 8px
+            // bottom margin (GTK) rather than from this block.
             let composer_outer = container(composer_frame).padding([
-                self.space(0.59) as u16,
+                0,
                 self.space(1.35) as u16,
                 self.space(1.19) as u16,
                 self.space(1.35) as u16,
@@ -3545,13 +3560,18 @@ fn tray_button_class(radius: f32) -> cosmic::theme::Button {
 
 fn tray_text_button(label: &'static str, zoom: f32, message: Message) -> Element<'static, Message> {
     let radius = crate::metrics::space(0.37, zoom);
-    button::custom(text(label).size(crate::metrics::em(0.96, zoom)).class(
-        cosmic::theme::Text::Color(palette::current().tray_button_text),
-    ))
-    .padding([
-        crate::metrics::space(0.3, zoom) as u16,
-        crate::metrics::space(0.7, zoom) as u16,
-    ])
+    button::custom(
+        text(label)
+            .size(crate::metrics::em(0.96, zoom))
+            .line_height(crate::metrics::line_height(1.0))
+            .class(cosmic::theme::Text::Color(
+                palette::current().tray_button_text,
+            )),
+    )
+    // GTK's `button.queue-tray-cancel`: `min-height: 1.85em`,
+    // `padding: 0 0.7em`.
+    .height(Length::Fixed(crate::metrics::space(1.85, zoom)))
+    .padding([0, crate::metrics::space(0.7, zoom) as u16])
     .class(tray_button_class(radius))
     .on_press(message)
     .into()
@@ -3574,10 +3594,10 @@ fn tray_icon_button(
                 }
             })),
     )
-    .padding([
-        crate::metrics::space(0.3, zoom) as u16,
-        crate::metrics::space(0.4, zoom) as u16,
-    ])
+    // GTK's square twin: `min-width: 1.85em; padding: 0` with a 1em glyph.
+    .width(Length::Fixed(crate::metrics::space(1.85, zoom)))
+    .height(Length::Fixed(crate::metrics::space(1.85, zoom)))
+    .padding(0)
     .class(tray_button_class(radius))
     .on_press(message)
     .into()
