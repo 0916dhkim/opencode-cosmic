@@ -1099,6 +1099,10 @@ impl Application for OpenCodeCosmic {
                 // GTK's `.session-tab { min-height: 2.6em }` resolves against the
                 // sidebar's 0.96em font (33.3px), not the base 13.33px one.
                 .height(Length::Fixed(self.space(2.6 * 0.96)))
+                // A fixed-height container places its child at the top unless
+                // told otherwise, which left the row's content riding high in
+                // GTK's 2.6em box instead of centred in it.
+                .align_y(Alignment::Center)
                 .padding([0, self.space(0.3) as u16])
                 .style(move |_theme: &cosmic::Theme| {
                     // GTK marked the dragged row and the drop position.
