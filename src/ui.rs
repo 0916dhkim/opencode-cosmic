@@ -2111,11 +2111,8 @@ impl Application for OpenCodeCosmic {
                             .into(),
                         );
                     }
-                    let delivery_label = match item.delivery {
-                        protocol::Delivery::Steer => "STEER",
-                        protocol::Delivery::Queue => "QUEUE",
-                        _ => "STEER",
-                    };
+                    // GTK's `tray::badge_text`: "↪ STEER" / "⏸ QUEUE".
+                    let delivery_label = crate::tray::badge_text(item.delivery);
 
                     let preview_text = item.summary.clone();
 
