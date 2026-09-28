@@ -4826,9 +4826,8 @@ impl OpenCodeCosmic {
                     .size(self.em(0.96))
                     .class(cosmic::theme::Text::Color(color))
                     .into(),
-                button::icon(icons::stop())
-                    .on_press(Message::StopSession)
-                    .into(),
+                // GTK's transcript indicator is spinner plus label only: the
+                // stop control lives in the composer.
             ])
             .spacing(self.space(0.59))
             .align_y(Alignment::Center),
