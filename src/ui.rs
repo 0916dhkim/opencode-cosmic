@@ -981,6 +981,7 @@ impl Application for OpenCodeCosmic {
         let tab_list_col =
             column::with_children(tab_rows).spacing(self.space(crate::metrics::px(2.0)));
         let tab_scroll = scrollable(tab_list_col)
+            .direction(scrollbar_direction())
             .height(Length::Fill)
             .width(Length::Fill);
         sidebar_items.push(
@@ -1682,6 +1683,7 @@ impl Application for OpenCodeCosmic {
             // No `anchor_bottom`: iced's anchored offset swallows the
             // programmatic `snap_to` that follows a running transcript.
             let transcript_scroll = scrollable(message_list)
+                .direction(scrollbar_direction())
                 .id(transcript_id())
                 .width(Length::Fill)
                 .height(Length::Fill)
@@ -2871,6 +2873,19 @@ fn flat_button_class(zoom: f32) -> cosmic::theme::Button {
         pressed: Box::new(move |_focused, _theme| base()),
         disabled: Box::new(move |_theme| base()),
     }
+}
+
+/// GTK's scrollbars: Adwaita's trough is 15px wide with an 8px rounded thumb
+/// centred in it. libcosmic's theme class for scrollables is an enum with no
+/// custom variant (its `Scrollable::style` needs a class, not a closure), so
+/// only the metrics are settable — the default rail was 10px wide with a 10px
+/// thumb, which hid the trough completely.
+fn scrollbar_direction() -> cosmic::iced::widget::scrollable::Direction {
+    cosmic::iced::widget::scrollable::Direction::Vertical(
+        cosmic::iced::widget::scrollable::Scrollbar::new()
+            .width(15.0)
+            .scroller_width(8.0),
+    )
 }
 
 /// GTK's plain (default) button — Adwaita's `button.bg` with its 1px border,
@@ -4734,10 +4749,11 @@ mod tests {
         assert_eq!(next_zoom(1.3, 1), 1.5);
         assert_eq!(next_zoom(0.7, -1), 0.7, "clamped at the bottom");
         assert_eq!(next_zoom(1.75, 1), 1.75, "clamped at the top");
-        // 1em and the GTK spacing scale grow with the zoom.
+        // 1em and the GTK spacing scale grow with the zoom. 1em is GTK's
+        // "Noto Sans, 10" (10pt = 13.33px).
         assert_eq!(crate::metrics::em(1.0, 1.0), 13);
-        assert_eq!(crate::metrics::em(0.76, 1.75), 17);
-        assert!((crate::metrics::space(1.19, 1.2) - 18.564).abs() < 0.01);
+        assert_eq!(crate::metrics::em(0.76, 1.75), 18);
+        assert!((crate::metrics::space(1.19, 1.2) - 19.036).abs() < 0.01);
     }
 
     #[test]

@@ -1,4 +1,6 @@
 use cosmic::Element;
+use cosmic::iced::widget::rich_text;
+use cosmic::iced::widget::text::Span;
 use cosmic::iced::{Border, Length};
 use cosmic::widget::{button, column, container, row, text};
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
@@ -21,17 +23,55 @@ fn code_line_height() -> cosmic::iced::core::text::LineHeight {
     crate::metrics::line_height(1.35)
 }
 
+/// One styled run of inline text.
+///
+/// GTK built a Pango markup string from the same events (`<b>`, `<i>`,
+/// `<span font_family="monospace">`, `<span strikethrough="true">`, links), and
+/// its label rendered it. iced's `rich_text` takes spans, so the run keeps the
+/// style instead of the markup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Inline {
+    Plain,
+    Bold,
+    Italic,
+    Strike,
+    Code,
+    Link,
+}
+
 #[derive(Clone, Debug)]
-pub enum MarkdownBlock {
-    Paragraph(String),
-    Heading(u8, String),
+struct Run {
+    text: String,
+    inline: Inline,
+}
+
+/// Trailing/leading whitespace around a block is dropped, as GTK's
+/// `current_text.trim()` did.
+fn trim_runs(runs: &mut Vec<Run>) {
+    if let Some(first) = runs.first_mut() {
+        first.text = first.text.trim_start().to_string();
+    }
+    if let Some(last) = runs.last_mut() {
+        last.text = last.text.trim_end().to_string();
+    }
+    runs.retain(|run| !run.text.is_empty());
+}
+
+fn runs_are_empty(runs: &[Run]) -> bool {
+    runs.iter().all(|run| run.text.trim().is_empty())
+}
+
+#[derive(Clone, Debug)]
+enum MarkdownBlock {
+    Paragraph(Vec<Run>),
+    Heading(u8, Vec<Run>),
     Code(Option<String>, String),
-    List(Vec<String>),
-    Blockquote(String),
+    List(Vec<Vec<Run>>),
+    Blockquote(Vec<Run>),
     Rule,
 }
 
-pub fn parse_markdown(source: &str) -> Vec<MarkdownBlock> {
+fn parse_markdown(source: &str) -> Vec<MarkdownBlock> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
@@ -39,12 +79,25 @@ pub fn parse_markdown(source: &str) -> Vec<MarkdownBlock> {
 
     let parser = Parser::new_ext(source, options);
     let mut blocks = Vec::new();
-    let mut current_text = String::new();
+    let mut runs: Vec<Run> = Vec::new();
+    let mut styles: Vec<Inline> = Vec::new();
     let mut current_code_lang = None;
     let mut current_heading_level = None;
     let mut in_blockquote = false;
-    let mut current_list_items = Vec::new();
+    let mut current_list_items: Vec<Vec<Run>> = Vec::new();
     let mut in_list = false;
+
+    let push_run = |runs: &mut Vec<Run>, text: &str, styles: &[Inline]| {
+        let inline = styles.last().copied().unwrap_or(Inline::Plain);
+        match runs.last_mut() {
+            // Adjacent runs with the same style render as one span.
+            Some(last) if last.inline == inline => last.text.push_str(text),
+            _ => runs.push(Run {
+                text: text.to_string(),
+                inline,
+            }),
+        }
+    };
 
     for event in parser {
         match event {
@@ -57,15 +110,12 @@ pub fn parse_markdown(source: &str) -> Vec<MarkdownBlock> {
                     HeadingLevel::H5 => 5,
                     HeadingLevel::H6 => 6,
                 });
-                current_text.clear();
+                runs.clear();
             }
             Event::End(TagEnd::Heading(_)) => {
                 if let Some(level) = current_heading_level.take() {
-                    blocks.push(MarkdownBlock::Heading(
-                        level,
-                        current_text.trim().to_string(),
-                    ));
-                    current_text.clear();
+                    trim_runs(&mut runs);
+                    blocks.push(MarkdownBlock::Heading(level, std::mem::take(&mut runs)));
                 }
             }
             Event::Start(Tag::CodeBlock(kind)) => {
@@ -80,12 +130,14 @@ pub fn parse_markdown(source: &str) -> Vec<MarkdownBlock> {
                     }
                     CodeBlockKind::Indented => None,
                 };
-                current_text.clear();
+                // A fenced block's text arrives as Text events; collect it raw.
+                runs.clear();
             }
             Event::End(TagEnd::CodeBlock) => {
                 let lang = current_code_lang.take();
-                blocks.push(MarkdownBlock::Code(lang, current_text.clone()));
-                current_text.clear();
+                let code = runs.iter().map(|run| run.text.as_str()).collect::<String>();
+                blocks.push(MarkdownBlock::Code(lang, code));
+                runs.clear();
             }
             Event::Start(Tag::List(_)) => {
                 in_list = true;
@@ -98,45 +150,58 @@ pub fn parse_markdown(source: &str) -> Vec<MarkdownBlock> {
                 }
             }
             Event::Start(Tag::Item) => {
-                current_text.clear();
+                runs.clear();
             }
             Event::End(TagEnd::Item) => {
-                if in_list && !current_text.trim().is_empty() {
-                    current_list_items.push(current_text.trim().to_string());
+                trim_runs(&mut runs);
+                if in_list && !runs.is_empty() {
+                    current_list_items.push(std::mem::take(&mut runs));
                 }
-                current_text.clear();
             }
             Event::Start(Tag::BlockQuote(_)) => {
                 in_blockquote = true;
-                current_text.clear();
+                runs.clear();
             }
             Event::End(TagEnd::BlockQuote(_)) => {
                 in_blockquote = false;
-                if !current_text.trim().is_empty() {
-                    blocks.push(MarkdownBlock::Blockquote(current_text.trim().to_string()));
+                trim_runs(&mut runs);
+                if !runs.is_empty() {
+                    blocks.push(MarkdownBlock::Blockquote(std::mem::take(&mut runs)));
                 }
-                current_text.clear();
             }
             Event::Start(Tag::Paragraph) => {
-                current_text.clear();
+                runs.clear();
             }
             Event::End(TagEnd::Paragraph) => {
-                if !in_list && !in_blockquote && !current_text.trim().is_empty() {
-                    blocks.push(MarkdownBlock::Paragraph(current_text.trim().to_string()));
+                if !in_list && !in_blockquote {
+                    trim_runs(&mut runs);
+                    if !runs.is_empty() {
+                        blocks.push(MarkdownBlock::Paragraph(std::mem::take(&mut runs)));
+                    } else {
+                        runs.clear();
+                    }
                 }
-                current_text.clear();
             }
-            Event::Text(t) => {
-                current_text.push_str(&t);
+            Event::Start(Tag::Strong) => styles.push(Inline::Bold),
+            Event::End(TagEnd::Strong) => {
+                styles.pop();
             }
-            Event::Code(c) => {
-                current_text.push('`');
-                current_text.push_str(&c);
-                current_text.push('`');
+            Event::Start(Tag::Emphasis) => styles.push(Inline::Italic),
+            Event::End(TagEnd::Emphasis) => {
+                styles.pop();
             }
-            Event::SoftBreak | Event::HardBreak => {
-                current_text.push('\n');
+            Event::Start(Tag::Strikethrough) => styles.push(Inline::Strike),
+            Event::End(TagEnd::Strikethrough) => {
+                styles.pop();
             }
+            Event::Start(Tag::Link { .. }) => styles.push(Inline::Link),
+            Event::End(TagEnd::Link) => {
+                styles.pop();
+            }
+            Event::Text(t) => push_run(&mut runs, &t, &styles),
+            // GTK rendered an inline code span as monospace, with no backticks.
+            Event::Code(c) => push_run(&mut runs, &c, &[Inline::Code]),
+            Event::SoftBreak | Event::HardBreak => push_run(&mut runs, "\n", &styles),
             Event::Rule => {
                 blocks.push(MarkdownBlock::Rule);
             }
@@ -144,11 +209,42 @@ pub fn parse_markdown(source: &str) -> Vec<MarkdownBlock> {
         }
     }
 
-    if !current_text.trim().is_empty() {
-        blocks.push(MarkdownBlock::Paragraph(current_text.trim().to_string()));
+    trim_runs(&mut runs);
+    if !runs.is_empty() {
+        blocks.push(MarkdownBlock::Paragraph(runs));
     }
 
     blocks
+}
+
+/// One run as an iced span: GTK put these styles in Pango markup.
+fn span<'a>(run: &Run) -> Span<'a, ()> {
+    let mut span = Span::new(run.text.clone());
+    match run.inline {
+        Inline::Plain => {}
+        Inline::Bold => {
+            span = span.font(cosmic::iced::Font {
+                weight: cosmic::iced::font::Weight::Bold,
+                ..cosmic::iced::Font::DEFAULT
+            });
+        }
+        Inline::Italic => {
+            span = span.font(cosmic::iced::Font {
+                style: cosmic::iced::font::Style::Italic,
+                ..cosmic::iced::Font::DEFAULT
+            });
+        }
+        Inline::Strike => span = span.strikethrough(true),
+        Inline::Code => span = span.font(cosmic::iced::Font::MONOSPACE),
+        Inline::Link => {
+            span = span.color(palette::current().link_text).underline(true);
+        }
+    }
+    span
+}
+
+fn spans<'a>(runs: &[Run]) -> Vec<Span<'a, ()>> {
+    runs.iter().map(span).collect()
 }
 
 pub fn render_markdown<'a, Message: Clone + 'static, F>(
@@ -164,15 +260,15 @@ where
 
     for block in blocks {
         match block {
-            MarkdownBlock::Paragraph(p) => {
+            MarkdownBlock::Paragraph(runs) => {
                 elements.push(
-                    text(p)
+                    rich_text(spans(&runs))
                         .size(em(0.96, zoom))
                         .line_height(body_line_height())
                         .into(),
                 );
             }
-            MarkdownBlock::Heading(level, h) => {
+            MarkdownBlock::Heading(level, runs) => {
                 // GTK: .markdown-heading-1/2/3 = 1.45 / 1.28 / 1.14em.
                 let size = match level {
                     1 => em(1.45, zoom),
@@ -181,7 +277,7 @@ where
                     _ => em(0.96, zoom),
                 };
                 elements.push(
-                    text(h)
+                    rich_text(spans(&runs))
                         .size(size)
                         .line_height(heading_line_height())
                         .class(cosmic::theme::Text::Color(
@@ -191,6 +287,7 @@ where
                 );
             }
             MarkdownBlock::Code(lang, code) => {
+                let code_for_copy = code.clone();
                 let lang_label = lang.unwrap_or_else(|| "code".to_string());
                 let header = container(
                     row::with_children(vec![
@@ -204,9 +301,10 @@ where
                             .into(),
                         button::icon(crate::icons::copy())
                             // GTK's `button.markdown-code-copy` is 1.93em
-                            // square, which sets the header's height.
-                            .padding(space(0.35, zoom))
-                            .on_press(on_copy(code.clone()))
+                            // square (25.7px), which sets the header's height;
+                            // the icon is 12px, so the padding carries the rest.
+                            .padding([space(0.52, zoom) as u16, space(0.52, zoom) as u16])
+                            .on_press(on_copy(code_for_copy))
                             .into(),
                     ])
                     .align_y(cosmic::iced::Alignment::Center),
@@ -266,7 +364,7 @@ where
                             .line_height(body_line_height())
                             .class(cosmic::theme::Text::Color(palette::current().muted_text))
                             .into(),
-                        text(item)
+                        rich_text(spans(&item))
                             .size(em(0.96, zoom))
                             .line_height(body_line_height())
                             .width(Length::Fill)
@@ -282,19 +380,23 @@ where
                         .into(),
                 );
             }
-            MarkdownBlock::Blockquote(quote) => {
-                let q = container(text(quote).size(em(0.96, zoom)))
-                    .padding([space(0.4, zoom) as u16, space(0.7, zoom) as u16])
-                    .style(|_theme| container::Style {
-                        background: Some(palette::current().overlay_bg.into()),
-                        border: Border {
-                            color: palette::current().quote_border,
-                            width: 1.0,
-                            radius: 4.0.into(),
-                        },
-                        text_color: Some(palette::current().quote_text),
-                        ..Default::default()
-                    });
+            MarkdownBlock::Blockquote(runs) => {
+                let q = container(
+                    rich_text(spans(&runs))
+                        .size(em(0.96, zoom))
+                        .line_height(body_line_height()),
+                )
+                .padding([space(0.4, zoom) as u16, space(0.7, zoom) as u16])
+                .style(|_theme| container::Style {
+                    background: Some(palette::current().overlay_bg.into()),
+                    border: Border {
+                        color: palette::current().quote_border,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    text_color: Some(palette::current().quote_text),
+                    ..Default::default()
+                });
                 elements.push(q.into());
             }
             MarkdownBlock::Rule => {
@@ -313,4 +415,47 @@ where
     // GTK appends every markdown block to `.message-content`, whose own
     // spacing is 10px, so the blocks sit 10px apart.
     column::with_children(elements).spacing(10).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plain(source: &str) -> String {
+        parse_markdown(source)
+            .into_iter()
+            .filter_map(|block| match block {
+                MarkdownBlock::Paragraph(runs) | MarkdownBlock::Blockquote(runs) => {
+                    Some(runs.iter().map(|run| run.text.as_str()).collect::<String>())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn inline_code_keeps_its_text_without_backticks() {
+        let blocks = parse_markdown("stay `34×32` wide");
+        let MarkdownBlock::Paragraph(runs) = &blocks[0] else {
+            panic!("expected a paragraph");
+        };
+        assert_eq!(runs[1].text, "34×32");
+        assert_eq!(runs[1].inline, Inline::Code);
+        assert!(!plain("stay `34×32` wide").contains('`'));
+    }
+
+    #[test]
+    fn emphasis_and_links_become_styled_runs() {
+        let blocks = parse_markdown("Draw at **22px**, *slightly* [smaller](#)");
+        let MarkdownBlock::Paragraph(runs) = &blocks[0] else {
+            panic!("expected a paragraph");
+        };
+        let styles: Vec<Inline> = runs.iter().map(|run| run.inline).collect();
+        assert!(styles.contains(&Inline::Bold));
+        assert!(styles.contains(&Inline::Italic));
+        assert!(styles.contains(&Inline::Link));
+        let text: String = runs.iter().map(|run| run.text.as_str()).collect();
+        assert_eq!(text, "Draw at 22px, slightly smaller");
+    }
 }

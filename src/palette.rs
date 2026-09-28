@@ -211,6 +211,12 @@ pub struct Palette {
     pub plain_button_border: Color,
     /// Adwaita's default button text (`@theme_fg_color`).
     pub plain_button_text: Color,
+    /// Adwaita's scrollbar trough, measured from the GTK captures
+    /// (`#cecece` light / `#313131` dark).
+    pub scrollbar_trough: Color,
+    /// Adwaita's idle scrollbar thumb (`#7e8182` light / `#a4a4a3` dark), 8px
+    /// wide inside the 15px trough.
+    pub scrollbar_thumb: Color,
 }
 
 pub const LIGHT: Palette = Palette {
@@ -311,6 +317,8 @@ pub const LIGHT: Palette = Palette {
     plain_button_bg: Color::from_rgb8(0xf8, 0xf7, 0xf7),
     plain_button_border: Color::from_rgb8(0xcd, 0xc7, 0xc2),
     plain_button_text: Color::from_rgb8(0x2e, 0x34, 0x36),
+    scrollbar_trough: Color::from_rgb8(0xce, 0xce, 0xce),
+    scrollbar_thumb: Color::from_rgb8(0x7e, 0x81, 0x82),
 };
 
 pub const DARK: Palette = Palette {
@@ -411,6 +419,8 @@ pub const DARK: Palette = Palette {
     plain_button_bg: Color::from_rgb8(0x38, 0x38, 0x38),
     plain_button_border: Color::from_rgb8(0x1b, 0x1b, 0x1b),
     plain_button_text: Color::from_rgb8(0xdc, 0xdc, 0xda),
+    scrollbar_trough: Color::from_rgb8(0x31, 0x31, 0x31),
+    scrollbar_thumb: Color::from_rgb8(0xa4, 0xa4, 0xa3),
 };
 
 /// The palette for the active COSMIC theme; light desktops get [`LIGHT`].

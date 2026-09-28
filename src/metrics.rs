@@ -7,8 +7,9 @@
 //! size goes through [`em`] (and the GTK spacing scale through [`space`]) with
 //! the app's zoom.
 
-/// 1em, in logical pixels.
-pub const BASE_FONT_PX: f32 = 13.0;
+/// 1em, in logical pixels: GTK's default font ("Noto Sans, 10") is 10pt, which
+/// is 13.33px at 96dpi, and every `em` in the client's stylesheet is that.
+pub const BASE_FONT_PX: f32 = 13.3333;
 
 /// `factor` em at `zoom`, rounded to whole pixels.
 #[must_use]
@@ -34,7 +35,7 @@ pub fn px(value: f32) -> f32 {
 /// factors by this makes a stylesheet line-height render at the pitch GTK gave
 /// it — without it every transcript line came out ~20% short, which is what
 /// made the port's transcript fit three more rows than GTK's.
-pub const GTK_LINE_HEIGHT_RATIO: f32 = 1.38;
+pub const GTK_LINE_HEIGHT_RATIO: f32 = 1.347;
 
 /// A GTK CSS `line-height` factor as an iced [`LineHeight`].
 ///
