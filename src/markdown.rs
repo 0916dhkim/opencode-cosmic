@@ -366,17 +366,26 @@ where
                 // GTK appends each item as its own block in `.message-content`, so
                 // the items sit the content box's 10px apart.
                 let mut list_col = column::with_capacity(items.len()).spacing(space(0.75, zoom));
+                // GTK's `.markdown-list-marker` is a `min-width: 1.33em` box —
+                // 13px in the rendered app. The bullet sits at the box's left
+                // edge and the item text starts at its right, so the marker is
+                // a box, not a glyph followed by a space (which measured 8px
+                // against GTK's 13).
+                let marker_box = space(0.975, zoom);
                 for item in items {
                     let bullet_item = row::with_children(vec![
-                        text("• ")
-                            .size(em(0.96, zoom))
-                            .line_height(body_line_height())
-                            .font(cosmic::iced::Font {
-                                weight: cosmic::iced::font::Weight::Bold,
-                                ..cosmic::iced::Font::DEFAULT
-                            })
-                            .class(cosmic::theme::Text::Color(palette::current().muted_text))
-                            .into(),
+                        container(
+                            text("•")
+                                .size(em(0.96, zoom))
+                                .line_height(body_line_height())
+                                .font(cosmic::iced::Font {
+                                    weight: cosmic::iced::font::Weight::Bold,
+                                    ..cosmic::iced::Font::DEFAULT
+                                })
+                                .class(cosmic::theme::Text::Color(palette::current().muted_text)),
+                        )
+                        .width(Length::Fixed(marker_box))
+                        .into(),
                         rich_text(spans(&item, false))
                             .size(em(0.96, zoom))
                             .line_height(body_line_height())
@@ -389,7 +398,9 @@ where
                     // GTK's list items are blocks with `margin-start: 28`, and no
                     // vertical padding of their own.
                     container(list_col)
-                        .padding([0, space(0.59, zoom) as u16])
+                        // GTK's list is indented 1.01em (measured against its
+                        // own render) rather than the 0.59em used here.
+                        .padding([0.0, space(0.59, zoom), 0.0, space(1.01, zoom)])
                         .into(),
                 );
             }
