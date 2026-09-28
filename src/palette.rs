@@ -20,6 +20,9 @@ pub struct Palette {
     pub sidebar_bg: Color,
     /// `@oc_border_tab_strip`
     pub sidebar_border: Color,
+    /// Adwaita's paned separator, which GTK draws beside the tab strip's
+    /// own border: #cdc7c2 light / #1b1b1b dark (measured x269-270).
+    pub window_separator: Color,
     /// `@oc_bg_session_tab_active` — the active sidebar row.
     pub sidebar_row_active_bg: Color,
     /// `@oc_bg_sidebar_nav_separator`
@@ -310,6 +313,7 @@ pub const LIGHT: Palette = Palette {
     window_bg: Color::from_rgb8(0xf7, 0xf5, 0xf1),
     sidebar_bg: Color::from_rgb8(0xf0, 0xee, 0xe9),
     sidebar_border: Color::from_rgb8(0xd8, 0xd4, 0xcc),
+    window_separator: Color::from_rgb8(0xcd, 0xc7, 0xc2),
     sidebar_row_active_bg: Color::from_rgb8(0xde, 0xdb, 0xd4),
     nav_separator: Color::from_rgb8(0xd0, 0xcc, 0xc4),
     inset_bg: Color::from_rgb8(0xf0, 0xec, 0xe1),
@@ -455,6 +459,7 @@ pub const DARK: Palette = Palette {
     window_bg: Color::from_rgb8(0x10, 0x12, 0x14),
     sidebar_bg: Color::from_rgb8(0x0d, 0x0f, 0x11),
     sidebar_border: Color::from_rgb8(0x24, 0x28, 0x2c),
+    window_separator: Color::from_rgb8(0x1b, 0x1b, 0x1b),
     sidebar_row_active_bg: Color::from_rgb8(0x22, 0x26, 0x2a),
     nav_separator: Color::from_rgb8(0x2b, 0x30, 0x34),
     inset_bg: Color::from_rgb8(0x13, 0x16, 0x19),

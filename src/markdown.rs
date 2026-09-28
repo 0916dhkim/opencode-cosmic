@@ -386,7 +386,15 @@ where
                             ..Default::default()
                         });
 
-                elements.push(code_block_container.into());
+                // GTK's block lands flush with `.message-content`'s right
+                // edge; the port's full-width markdown content runs 8px wider
+                // there (measured right border 1135 against GTK's 1127), so
+                // the block takes that back as a right inset. The band, the
+                // left edge and the block's height are unaffected.
+                let code_block_outer = container(code_block_container)
+                    .width(Length::Fill)
+                    .padding([0.0, space(0.59, zoom), 0.0, 0.0]);
+                elements.push(code_block_outer.into());
             }
             MarkdownBlock::List(items) => {
                 // GTK appends each item as its own block in `.message-content`, so

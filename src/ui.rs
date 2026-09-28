@@ -1333,8 +1333,10 @@ impl Application for OpenCodeCosmic {
         sidebar_items.push(footer_container.into());
 
         // GTK's paned position: 270px (plus the 1px right border).
+        // GTK's paned position is 270: a 269px strip plus the tab strip's
+        // own 1px border, with Adwaita's separator just outside it.
         let sidebar_column = column::with_children(sidebar_items)
-            .width(Length::Fixed(270.0))
+            .width(Length::Fixed(269.0))
             .height(Length::Fill);
 
         // GTK's `.tab-strip`: the sidebar background with a 1px right border
@@ -1345,13 +1347,29 @@ impl Application for OpenCodeCosmic {
                 background: Some(palette::current().sidebar_bg.into()),
                 ..Default::default()
             });
-        let sidebar_divider = container(row::with_children(Vec::<Element<'_, Message>>::new()))
-            .width(Length::Fixed(1.0))
-            .height(Length::Fill)
-            .style(|_theme| container::Style {
-                background: Some(palette::current().sidebar_border.into()),
-                ..Default::default()
-            });
+        // GTK's tab strip carries a 1px right border and Adwaita's paned
+        // separator adds a second pixel beside it: x269 `@oc_border_tab_strip`,
+        // x270 the separator colour.
+        let sidebar_divider = row::with_children(vec![
+            container(row::with_children(Vec::<Element<'_, Message>>::new()))
+                .width(Length::Fixed(1.0))
+                .height(Length::Fill)
+                .style(|_theme| container::Style {
+                    background: Some(palette::current().sidebar_border.into()),
+                    ..Default::default()
+                })
+                .into(),
+            container(row::with_children(Vec::<Element<'_, Message>>::new()))
+                .width(Length::Fixed(1.0))
+                .height(Length::Fill)
+                .style(|_theme| container::Style {
+                    background: Some(palette::current().window_separator.into()),
+                    ..Default::default()
+                })
+                .into(),
+        ])
+        .spacing(0.0)
+        .height(Length::Fill);
 
         // 2. Build Main Content Pane
         let mut main_items = Vec::new();
@@ -1817,7 +1835,13 @@ impl Application for OpenCodeCosmic {
             }
 
             let message_list = column::with_children(message_elements)
-                .spacing(self.space(crate::metrics::px(0.0)));
+                .spacing(self.space(crate::metrics::px(0.0)))
+                // GTK's scrollbar occupies a 16px gutter; iced reserves
+                // ~9px and overlays the rest, so the content carries the
+                // remaining ~7px as a right inset. Without it the band ends
+                // at 1161 (GTK 1154) and every full-width markdown block
+                // overflows its row's content box by ~15px.
+                .padding([0.0, self.space(0.53), 0.0, 0.0]);
 
             // Anchored to the end: the run stays in view and `snap_to` keeps
             // it there, while an empty transcript has nothing to anchor.
@@ -2767,20 +2791,39 @@ fn line_height(factor: f32) -> cosmic::iced::core::text::LineHeight {
     crate::metrics::line_height(factor)
 }
 
+/// GTK dims these glyphs with `opacity: 0.45`. iced's SVG icons honour
+/// `icon_color` but not its alpha, so the blend is done here against the
+/// surface behind them (the sidebar's own background).
+fn dim_over(c: cosmic::iced::Color, bg: cosmic::iced::Color, alpha: f32) -> cosmic::iced::Color {
+    cosmic::iced::Color::from_rgba(
+        c.r * alpha + bg.r * (1.0 - alpha),
+        c.g * alpha + bg.g * (1.0 - alpha),
+        c.b * alpha + bg.b * (1.0 - alpha),
+        1.0,
+    )
+}
+
 fn tab_action_class(shown: bool, radius: f32) -> cosmic::theme::Button {
+    // GTK: `@oc_fg_sidebar_new_session` dimmed to 45% until the row is active or
+    // hovered, then `@oc_fg_session_tab_active_session_tab_title` at full
+    // strength. The glyphs are SVG, so `icon_color` is the one that paints them.
+    let fg = move || {
+        if shown {
+            palette::current().tab_active_text
+        } else {
+            dim_over(
+                palette::current().sidebar_label,
+                palette::current().sidebar_bg,
+                0.45,
+            )
+        }
+    };
     let base = move || cosmic::widget::button::Style {
         background: None,
         border_radius: radius.into(),
         border_width: 0.0,
-        // GTK: `@oc_fg_sidebar_new_session` dimmed to 45% until the row is
-        // active or hovered, then `@oc_fg_session_tab_active_session_tab_title`
-        // at full strength.
-        text_color: Some(if shown {
-            palette::current().tab_active_text
-        } else {
-            let fg = palette::current().sidebar_label;
-            cosmic::iced::Color::from_rgba(fg.r, fg.g, fg.b, 0.45)
-        }),
+        text_color: Some(fg()),
+        icon_color: Some(fg()),
         ..Default::default()
     };
     cosmic::theme::Button::Custom {
@@ -2793,21 +2836,29 @@ fn tab_action_class(shown: bool, radius: f32) -> cosmic::theme::Button {
 
 /// GTK's `button.session-tab-close:hover`: a red fill with a white glyph.
 fn close_button_class(shown: bool, radius: f32) -> cosmic::theme::Button {
+    let fg = move || {
+        if shown {
+            palette::current().tab_active_text
+        } else {
+            dim_over(
+                palette::current().sidebar_label,
+                palette::current().sidebar_bg,
+                0.45,
+            )
+        }
+    };
     let base = move || cosmic::widget::button::Style {
         background: None,
         border_radius: radius.into(),
         border_width: 0.0,
-        text_color: Some(if shown {
-            palette::current().tab_active_text
-        } else {
-            let fg = palette::current().sidebar_label;
-            cosmic::iced::Color::from_rgba(fg.r, fg.g, fg.b, 0.45)
-        }),
+        text_color: Some(fg()),
+        icon_color: Some(fg()),
         ..Default::default()
     };
     let hovered = move || cosmic::widget::button::Style {
         background: Some(palette::current().tab_close_hover_bg.into()),
         text_color: Some(palette::current().tab_close_hover_fg),
+        icon_color: Some(palette::current().tab_close_hover_fg),
         ..base()
     };
     let base = move || cosmic::widget::button::Style {
@@ -4527,7 +4578,12 @@ impl OpenCodeCosmic {
     /// GTK's rename dialog: the title entry plus the session ID with a copy
     /// button (`.session-id-field`).
     fn rename_palette(&self) -> Element<'_, Message> {
-        let session_id = self.active_session_id.clone().unwrap_or_default();
+        // GTK reads the row the rename was opened on, not the active one.
+        let session_id = self
+            .rename_target
+            .clone()
+            .or_else(|| self.active_session_id.clone())
+            .unwrap_or_default();
         let id_radius = self.space(0.44);
 
         let id_field = container(
