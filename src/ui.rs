@@ -3666,7 +3666,9 @@ impl OpenCodeCosmic {
         } else {
             palette::current().status_pill_text
         };
-        let label = retry.unwrap_or_else(|| "Working…".to_string());
+        // GTK's `TranscriptIndicator::Working => "OpenCode is working"`
+        // (ui.rs:6112); the port said "Working…".
+        let label = retry.unwrap_or_else(|| "OpenCode is working".to_string());
 
         let pill = container(
             row::with_children(vec![
