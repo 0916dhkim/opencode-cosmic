@@ -1656,13 +1656,28 @@ impl Application for OpenCodeCosmic {
                                 .spacing(self.space(0.3))
                                 .width(Length::Fill);
                                 let card_radius = self.space(0.44);
+                                // GTK's `.message-error-card` carries a 4px
+                                // `border-left` plus `0.89em 1.04em` of padding,
+                                // so the stripe hugs the card's edge and runs
+                                // its full height while the body alone is
+                                // padded. Padding the card instead pushed the
+                                // body ~28px in and left the stripe short.
                                 body_items.push(
                                     container(
-                                        row::with_children(vec![accent.into(), card_body.into()])
-                                            .spacing(self.space(1.04))
-                                            .align_y(Alignment::Start),
+                                        row::with_children(vec![
+                                            accent.into(),
+                                            container(card_body)
+                                                .width(Length::Fill)
+                                                .padding([
+                                                    self.space(0.89) as u16,
+                                                    self.space(1.04) as u16,
+                                                    self.space(0.89) as u16,
+                                                    self.space(1.04) as u16,
+                                                ])
+                                                .into(),
+                                        ])
+                                        .align_y(Alignment::Start),
                                     )
-                                    .padding([self.space(0.89) as u16, self.space(1.04) as u16])
                                     .width(Length::Fill)
                                     .style(move |_theme: &cosmic::Theme| container::Style {
                                         background: Some(palette::current().error_card_bg.into()),
