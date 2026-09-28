@@ -218,9 +218,18 @@ fn parse_markdown(source: &str) -> Vec<MarkdownBlock> {
 }
 
 /// One run as an iced span: GTK put these styles in Pango markup.
-fn span<'a>(run: &Run) -> Span<'a, ()> {
+///
+/// `base_bold` carries a block-level weight (GTK's `.markdown-heading` is 700,
+/// which it applied to the whole label).
+fn span<'a>(run: &Run, base_bold: bool) -> Span<'a, ()> {
     let mut span = Span::new(run.text.clone());
     match run.inline {
+        Inline::Plain if base_bold => {
+            span = span.font(cosmic::iced::Font {
+                weight: cosmic::iced::font::Weight::Bold,
+                ..cosmic::iced::Font::DEFAULT
+            });
+        }
         Inline::Plain => {}
         Inline::Bold => {
             span = span.font(cosmic::iced::Font {
@@ -243,8 +252,8 @@ fn span<'a>(run: &Run) -> Span<'a, ()> {
     span
 }
 
-fn spans<'a>(runs: &[Run]) -> Vec<Span<'a, ()>> {
-    runs.iter().map(span).collect()
+fn spans<'a>(runs: &[Run], base_bold: bool) -> Vec<Span<'a, ()>> {
+    runs.iter().map(|run| span(run, base_bold)).collect()
 }
 
 pub fn render_markdown<'a, Message: Clone + 'static, F>(
@@ -262,7 +271,7 @@ where
         match block {
             MarkdownBlock::Paragraph(runs) => {
                 elements.push(
-                    rich_text(spans(&runs))
+                    rich_text(spans(&runs, false))
                         .size(em(0.96, zoom))
                         .line_height(body_line_height())
                         .into(),
@@ -277,7 +286,7 @@ where
                     _ => em(0.96, zoom),
                 };
                 elements.push(
-                    rich_text(spans(&runs))
+                    rich_text(spans(&runs, false))
                         .size(size)
                         .line_height(heading_line_height())
                         .class(cosmic::theme::Text::Color(
@@ -362,9 +371,13 @@ where
                         text("• ")
                             .size(em(0.96, zoom))
                             .line_height(body_line_height())
+                            .font(cosmic::iced::Font {
+                                weight: cosmic::iced::font::Weight::Bold,
+                                ..cosmic::iced::Font::DEFAULT
+                            })
                             .class(cosmic::theme::Text::Color(palette::current().muted_text))
                             .into(),
-                        rich_text(spans(&item))
+                        rich_text(spans(&item, false))
                             .size(em(0.96, zoom))
                             .line_height(body_line_height())
                             .width(Length::Fill)
@@ -382,7 +395,7 @@ where
             }
             MarkdownBlock::Blockquote(runs) => {
                 let q = container(
-                    rich_text(spans(&runs))
+                    rich_text(spans(&runs, false))
                         .size(em(0.96, zoom))
                         .line_height(body_line_height()),
                 )

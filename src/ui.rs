@@ -1280,7 +1280,7 @@ impl Application for OpenCodeCosmic {
                     text(display_title)
                         .size(self.em(0.9))
                         .font(cosmic::iced::Font {
-                            weight: cosmic::iced::font::Weight::Semibold,
+                            weight: cosmic::iced::font::Weight::Bold,
                             ..cosmic::iced::Font::DEFAULT
                         })
                         .width(Length::Fill)
@@ -1779,15 +1779,17 @@ impl Application for OpenCodeCosmic {
             let notice = self.form_notice();
             let notice_outer: Element<'_, Message> = match notice {
                 None => container(column::with_children(Vec::<Element<'_, Message>>::new()))
-                    .padding([0, self.pad_px(16.0)])
+                    .padding([0, self.pad_px(18.0)])
                     .into(),
                 Some(notice) => {
                     let radius = self.space(0.67);
                     let mut items: Vec<Element<'_, Message>> = vec![
+                        // GTK's `.form-notice-label` sets no size, so it renders
+                        // at the inherited 1em (13.33px), not a reduced one.
                         text(notice.text)
-                            .size(self.em(0.9))
+                            .size(self.em(1.0))
                             .font(cosmic::iced::Font {
-                                weight: cosmic::iced::font::Weight::Semibold,
+                                weight: cosmic::iced::font::Weight::Bold,
                                 ..cosmic::iced::Font::DEFAULT
                             })
                             .class(cosmic::theme::Text::Color(
@@ -1824,12 +1826,13 @@ impl Application for OpenCodeCosmic {
                             .into(),
                         );
                     }
-                    container(
+                    let padded = container(
                         row::with_children(items)
                             .spacing(self.space(0.59))
                             .align_y(Alignment::Center),
                     )
-                    // GTK's `.form-notice`: `padding: 0.3em 0.3em 0.3em 0.89em`.
+                    // GTK's `.form-notice`: `padding: 0.3em 0.3em 0.3em 0.89em`
+                    // inside a box with start/end margins of 18px.
                     .padding([
                         self.space(0.3) as u16,
                         self.space(0.3) as u16,
@@ -1845,8 +1848,16 @@ impl Application for OpenCodeCosmic {
                             radius: radius.into(),
                         },
                         ..Default::default()
-                    })
-                    .into()
+                    });
+                    // GTK's notice box carried `margin-start/end: 18` and
+                    // `margin-bottom: 8`.
+                    // GTK's notice box carried `margin-start/end: 18` and
+                    // `margin-bottom: 8`; the composer block's own 8px top
+                    // padding stands in for that margin, so the gap below the
+                    // notice is 8px, not 16.
+                    container(padded)
+                        .padding([0.0_f32, self.space(1.35), 0.0, self.space(1.35)])
+                        .into()
                 }
             };
 
@@ -2323,11 +2334,14 @@ impl Application for OpenCodeCosmic {
                 ..Default::default()
             });
 
+            // GTK's composer stack carries 18px side margins and 16px at the
+            // bottom; the top gap below the notice is the composer box's own
+            // padding.
             let composer_outer = container(composer_frame).padding([
                 self.space(0.59) as u16,
+                self.space(1.35) as u16,
                 self.space(1.19) as u16,
-                self.space(1.19) as u16,
-                self.space(1.19) as u16,
+                self.space(1.35) as u16,
             ]);
             main_items.push(composer_outer.into());
         } else {
@@ -3349,7 +3363,7 @@ impl OpenCodeCosmic {
                     text(title.to_string())
                         .size(self.em(1.14))
                         .font(cosmic::iced::Font {
-                            weight: cosmic::iced::font::Weight::Semibold,
+                            weight: cosmic::iced::font::Weight::Bold,
                             ..cosmic::iced::Font::DEFAULT
                         })
                         .width(Length::Fill)
@@ -3469,7 +3483,7 @@ impl OpenCodeCosmic {
                         text(name)
                             .size(self.em(0.93))
                             .font(cosmic::iced::Font {
-                                weight: cosmic::iced::font::Weight::Semibold,
+                                weight: cosmic::iced::font::Weight::Bold,
                                 ..cosmic::iced::Font::DEFAULT
                             })
                             .width(Length::Fill)
