@@ -74,6 +74,8 @@ pub struct OpenCodeCosmic {
     model_search: String,
     level_search: String,
     composer_picker: Option<ComposerPicker>,
+    /// The row an open picker's arrow keys are on.
+    picker_highlight: usize,
     active_drawer: Option<DrawerPage>,
     sidebar_open: bool,
     connection_status: String,
@@ -223,6 +225,8 @@ pub enum Message {
     SelectVariant(String),
     ToggleComposerPicker(ComposerPicker),
     CloseComposerPicker,
+    PickerMove(i32),
+    PickerAccept,
     ModelSearchInput(String),
     LevelSearchInput(String),
     SettingsUrlInput(String),
@@ -336,6 +340,7 @@ impl Application for OpenCodeCosmic {
             model_search: String::new(),
             level_search: String::new(),
             composer_picker: None,
+            picker_highlight: 0,
             active_drawer: None,
             sidebar_open: true,
             connection_status: "Connecting".to_string(),
@@ -705,7 +710,17 @@ impl Application for OpenCodeCosmic {
                 Task::none()
             }
             Message::ComposerEnter { ctrl } => {
-                if self.composer_picker.is_some() {
+                // With a picker open, Enter takes its highlighted row rather
+                // than sending the prompt.
+                if let Some(picker) = self.composer_picker {
+                    if let Some((_, _, _, message)) = self
+                        .picker_candidates(picker)
+                        .into_iter()
+                        .nth(self.picker_highlight)
+                    {
+                        self.composer_picker = None;
+                        return self.update(message);
+                    }
                     return Task::none();
                 }
                 if self.active_drawer == Some(DrawerPage::NewSession) {
@@ -801,6 +816,7 @@ impl Application for OpenCodeCosmic {
                     return Task::none();
                 }
                 self.composer_picker = Some(picker);
+                self.picker_highlight = 0;
                 match picker {
                     ComposerPicker::Model => {
                         self.model_search.clear();
@@ -814,6 +830,26 @@ impl Application for OpenCodeCosmic {
             }
             Message::CloseComposerPicker => {
                 self.composer_picker = None;
+                Task::none()
+            }
+            Message::PickerMove(delta) => {
+                if let Some(picker) = self.composer_picker {
+                    let rows = self.picker_candidates(picker).len().max(1) as i32;
+                    self.picker_highlight =
+                        (self.picker_highlight as i32 + delta).rem_euclid(rows) as usize;
+                }
+                Task::none()
+            }
+            Message::PickerAccept => {
+                if let Some(picker) = self.composer_picker
+                    && let Some((_, _, _, message)) = self
+                        .picker_candidates(picker)
+                        .into_iter()
+                        .nth(self.picker_highlight)
+                {
+                    self.composer_picker = None;
+                    return self.update(message);
+                }
                 Task::none()
             }
             Message::ModelSearchInput(query) => {
@@ -2192,7 +2228,7 @@ impl Application for OpenCodeCosmic {
                             .and_then(|id| catalog.models.iter().find(|m| &m.model_id == id))
                             .map(|m| m.label.as_str())
                             .unwrap_or("Select model"),
-                        self.model_catalog_menu(catalog, model_id.as_deref()),
+                        self.model_catalog_menu(),
                     ),
                 );
 
@@ -2211,7 +2247,7 @@ impl Application for OpenCodeCosmic {
                     footer_items.push(self.composer_picker_control(
                         ComposerPicker::Level,
                         selected.unwrap_or("Default"),
-                        self.reasoning_level_menu(&model.variants, selected),
+                        self.reasoning_level_menu(),
                     ));
                 }
             }
@@ -2607,6 +2643,9 @@ fn shortcut(key: &Key, modifiers: Modifiers) -> Option<Message> {
             Some(Message::ComposerEnter { ctrl: false })
         }
         Key::Named(Named::Escape) => Some(Message::CloseDrawer),
+        // An open picker's highlight; without one these do nothing.
+        Key::Named(Named::ArrowUp) => Some(Message::PickerMove(-1)),
+        Key::Named(Named::ArrowDown) => Some(Message::PickerMove(1)),
         _ => None,
     }
 }
@@ -2969,11 +3008,16 @@ fn composer_menu_class(radius: f32) -> cosmic::theme::Button {
 }
 
 /// GTK's `.model-picker-row` is a flat button; selection and hover share a fill.
-fn model_row_class(selected: bool, level: bool, radius: f32) -> cosmic::theme::Button {
+fn model_row_class(
+    selected: bool,
+    level: bool,
+    highlighted: bool,
+    radius: f32,
+) -> cosmic::theme::Button {
     let base = move || cosmic::widget::button::Style {
         background: if selected && level {
             Some(palette::current().level_selected_bg.into())
-        } else if selected {
+        } else if selected || highlighted {
             Some(palette::current().model_row_hover_bg.into())
         } else {
             None
@@ -3859,43 +3903,19 @@ impl OpenCodeCosmic {
         popover.into()
     }
 
-    fn model_catalog_menu<'a>(
-        &'a self,
-        catalog: &'a ModelCatalog,
-        selected: Option<&str>,
-    ) -> Element<'a, Message> {
-        let query = self.model_search.trim();
-        let mut candidates: Vec<(i64, &model::ModelOption)> = catalog
-            .models
-            .iter()
-            .filter_map(|model| {
-                if query.is_empty() {
-                    return Some((0, model));
-                }
-                let label_score = fuzzy_score(query, &model.label);
-                let id_score = fuzzy_score(
-                    query,
-                    &format!("{} / {}", model.provider_id, model.model_id),
-                );
-                label_score
-                    .into_iter()
-                    .chain(id_score)
-                    .max()
-                    .map(|score| (score, model))
-            })
-            .collect();
-        if !query.is_empty() {
-            candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.label.cmp(&b.1.label)));
-        }
-        let rows: Vec<Element<'a, Message>> = candidates
+    fn model_catalog_menu<'a>(&'a self) -> Element<'a, Message> {
+        let rows: Vec<Element<'a, Message>> = self
+            .picker_candidates(ComposerPicker::Model)
             .into_iter()
-            .map(|(_, model)| {
+            .enumerate()
+            .map(|(index, (label, subtext, selected, action))| {
                 self.model_picker_row(
-                    &model.label,
-                    Some(format!("{}/{}", model.provider_id, model.model_id)),
-                    selected == Some(model.model_id.as_str()),
+                    &label,
+                    subtext,
+                    selected,
                     false,
-                    Message::SelectModel(model.model_id.clone()),
+                    index == self.picker_highlight,
+                    action,
                 )
             })
             .collect();
@@ -3911,39 +3931,19 @@ impl OpenCodeCosmic {
         )
     }
 
-    fn reasoning_level_menu<'a>(
-        &'a self,
-        variants: &'a [String],
-        selected: Option<&str>,
-    ) -> Element<'a, Message> {
-        let query = self.level_search.trim();
-        let mut candidates: Vec<(i64, &str)> = std::iter::once("Default")
-            .chain(variants.iter().map(String::as_str))
-            .filter_map(|label| {
-                if query.is_empty() {
-                    Some((0, label))
-                } else {
-                    fuzzy_score(query, label).map(|score| (score, label))
-                }
-            })
-            .collect();
-        if !query.is_empty() {
-            candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
-        }
-        let rows = candidates
+    fn reasoning_level_menu<'a>(&'a self) -> Element<'a, Message> {
+        let rows: Vec<Element<'a, Message>> = self
+            .picker_candidates(ComposerPicker::Level)
             .into_iter()
-            .map(|(_, label)| {
-                let is_selected = selected.unwrap_or("Default") == label;
+            .enumerate()
+            .map(|(index, (label, subtext, selected, action))| {
                 self.model_picker_row(
-                    label,
-                    None,
-                    is_selected,
+                    &label,
+                    subtext,
+                    selected,
                     true,
-                    Message::SelectVariant(if label == "Default" {
-                        String::new()
-                    } else {
-                        label.to_owned()
-                    }),
+                    index == self.picker_highlight,
+                    action,
                 )
             })
             .collect();
@@ -3959,12 +3959,126 @@ impl OpenCodeCosmic {
         )
     }
 
+    /// The active session's model catalog, when its directory's is loaded.
+    fn active_catalog(&self) -> Option<&ModelCatalog> {
+        let active = self.active_session_id.as_ref()?;
+        let directory = self.sessions.get(active)?.directory.clone();
+        self.catalogs.get(&directory)
+    }
+
+    /// The variants the active session's model offers.
+    fn active_model_variants(&self) -> Vec<String> {
+        let (Some(catalog), Some(model_id)) =
+            (self.active_catalog(), self.active_session_model_id())
+        else {
+            return Vec::new();
+        };
+        catalog
+            .models
+            .iter()
+            .find(|model| model.model_id == model_id)
+            .map(|model| model.variants.clone())
+            .unwrap_or_default()
+    }
+
+    /// The active session's chosen reasoning level.
+    fn active_variant(&self) -> Option<String> {
+        let active = self.active_session_id.as_ref()?;
+        self.sessions.get(active)?.model.as_ref()?.variant.clone()
+    }
+
+    /// The rows an open picker lists, in display order: the same filter and
+    /// sort its menu renders, so the arrow keys move over exactly those rows.
+    /// Each entry is (label, subtext, selected, action).
+    fn picker_candidates(
+        &self,
+        picker: ComposerPicker,
+    ) -> Vec<(String, Option<String>, bool, Message)> {
+        match picker {
+            ComposerPicker::Model => {
+                let Some(catalog) = self.active_catalog() else {
+                    return Vec::new();
+                };
+                let selected = self.active_session_model_id();
+                let query = self.model_search.trim();
+                let mut candidates: Vec<(i64, &model::ModelOption)> = catalog
+                    .models
+                    .iter()
+                    .filter_map(|model| {
+                        if query.is_empty() {
+                            return Some((0, model));
+                        }
+                        let label_score = fuzzy_score(query, &model.label);
+                        let id_score = fuzzy_score(
+                            query,
+                            &format!("{} / {}", model.provider_id, model.model_id),
+                        );
+                        label_score
+                            .into_iter()
+                            .chain(id_score)
+                            .max()
+                            .map(|score| (score, model))
+                    })
+                    .collect();
+                if !query.is_empty() {
+                    candidates
+                        .sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.label.cmp(&b.1.label)));
+                }
+                candidates
+                    .into_iter()
+                    .map(|(_, model)| {
+                        (
+                            model.label.clone(),
+                            Some(format!("{}/{}", model.provider_id, model.model_id)),
+                            selected.as_deref() == Some(model.model_id.as_str()),
+                            Message::SelectModel(model.model_id.clone()),
+                        )
+                    })
+                    .collect()
+            }
+            ComposerPicker::Level => {
+                let variants = self.active_model_variants();
+                let selected = self.active_variant();
+                let query = self.level_search.trim();
+                let mut candidates: Vec<(i64, &str)> = std::iter::once("Default")
+                    .chain(variants.iter().map(String::as_str))
+                    .filter_map(|label| {
+                        if query.is_empty() {
+                            Some((0, label))
+                        } else {
+                            fuzzy_score(query, label).map(|score| (score, label))
+                        }
+                    })
+                    .collect();
+                if !query.is_empty() {
+                    candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+                }
+                candidates
+                    .into_iter()
+                    .map(|(_, label)| {
+                        (
+                            label.to_owned(),
+                            None,
+                            selected.as_deref().unwrap_or("Default") == label,
+                            Message::SelectVariant(if label == "Default" {
+                                String::new()
+                            } else {
+                                label.to_owned()
+                            }),
+                        )
+                    })
+                    .collect()
+            }
+        }
+    }
+
     fn model_picker_row<'a>(
         &self,
         label: &str,
         subtext: Option<String>,
         selected: bool,
         level: bool,
+        highlighted: bool,
         selection: Message,
     ) -> Element<'a, Message> {
         let mut labels: Vec<Element<'a, Message>> = vec![
@@ -4024,7 +4138,12 @@ impl OpenCodeCosmic {
         )
         .padding([self.space(0.15), self.space(0.3)])
         .width(Length::Fill)
-        .class(model_row_class(selected, level, self.space(0.44)))
+        .class(model_row_class(
+            selected,
+            level,
+            highlighted,
+            self.space(0.44),
+        ))
         .on_press(selection)
         .into()
     }
@@ -4041,7 +4160,14 @@ impl OpenCodeCosmic {
         min_height: f32,
         empty_margin: f32,
     ) -> Element<'a, Message> {
-        let count = rows.len();
+        // GTK's min applies only while the rows are shorter than it; past that
+        // the scrolled window takes the list's natural height up to the max.
+        let rows_height = rows.len() as f32
+            * if picker == ComposerPicker::Model {
+                50.0
+            } else {
+                34.0
+            };
         if rows.is_empty() {
             rows.push(
                 container(
@@ -4072,19 +4198,22 @@ impl OpenCodeCosmic {
             .leading_icon(inline_icon(icons::search(), self.zoom).into())
             .style(model_search_class(self.space(0.44)))
             .width(Length::Fill);
-        let scroll_height = self.space(crate::metrics::px(
-            (count as f32
-                * if picker == ComposerPicker::Model {
-                    50.0
+        // GTK's `model_scroll`/`variant_scroll` propagate the list's natural
+        // height (`propagate_natural_height(true)`) between their
+        // `min_content_height` and `max_content_height`, so the list is sized
+        // by its rows rather than by a per-row constant.
+        let list = container(
+            scrollable(column::with_children(rows).width(Length::Fill))
+                .direction(scrollbar_direction())
+                .height(if rows_height < min_height {
+                    Length::Fixed(self.space(crate::metrics::px(min_height)))
                 } else {
-                    34.0
+                    Length::Shrink
                 })
-            .clamp(min_height, max_height),
-        ));
-        let list = scrollable(column::with_children(rows).width(Length::Fill))
-            .direction(scrollbar_direction())
-            .height(Length::Fixed(scroll_height))
-            .width(Length::Fill);
+                .width(Length::Fill),
+        )
+        .max_height(self.space(crate::metrics::px(max_height)))
+        .width(Length::Fill);
         let body = column::with_children(vec![search.into(), list.into()])
             .spacing(self.pad_px(6.0))
             .width(Length::Fixed(self.space(crate::metrics::px(width))));
