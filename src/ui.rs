@@ -376,11 +376,15 @@ impl Application for OpenCodeCosmic {
             ];
 
             // Preview mode is the screenshot/demo surface: show the paperclip
-            // chips without a real dialog.
-            app.pending_attachments = vec![
-                PathBuf::from("/state/home/paperclip-22px.png"),
-                PathBuf::from("/state/home/composer-actions-34x32.png"),
-            ];
+            // chips without a real dialog. Off by default so the preview's
+            // fixture matches the GTK client's (no pending attachments);
+            // `OPENCODE_GTK_PREVIEW_ATTACHMENTS=1` turns the demo on.
+            if std::env::var("OPENCODE_GTK_PREVIEW_ATTACHMENTS").is_ok() {
+                app.pending_attachments = vec![
+                    PathBuf::from("/state/home/paperclip-22px.png"),
+                    PathBuf::from("/state/home/composer-actions-34x32.png"),
+                ];
+            }
         } else {
             app.connect_api();
         }
@@ -1804,7 +1808,7 @@ impl Application for OpenCodeCosmic {
                         ))
                         .class(flat_button_class(self.zoom))
                         .on_press(Message::OpenWebUi)
-                        .padding([self.space(0.67) as u16, self.space(1.23) as u16])
+                        .padding([self.space(0.67) as u16, self.space(1.5) as u16])
                         .into(),
                     );
                     if notice.cancel.is_some() {
@@ -1816,8 +1820,9 @@ impl Application for OpenCodeCosmic {
                                     crate::pending::CANCEL_FORM_SHORTCUT
                                 ),
                             ))
+                            .class(plain_button_class(self.zoom))
                             .on_press(Message::CancelVisibleForm)
-                            .padding([self.space(0.67) as u16, self.space(1.23) as u16])
+                            .padding([self.space(0.67) as u16, self.space(1.5) as u16])
                             .into(),
                         );
                     }
@@ -1826,7 +1831,13 @@ impl Application for OpenCodeCosmic {
                             .spacing(self.space(0.59))
                             .align_y(Alignment::Center),
                     )
-                    .padding([self.space(0.59) as u16, self.space(1.23) as u16])
+                    // GTK's `.form-notice`: `padding: 0.3em 0.3em 0.3em 0.89em`.
+                    .padding([
+                        self.space(0.3) as u16,
+                        self.space(0.3) as u16,
+                        self.space(0.3) as u16,
+                        self.space(0.89) as u16,
+                    ])
                     .width(Length::Fill)
                     .style(move |_theme: &cosmic::Theme| container::Style {
                         background: Some(palette::current().form_notice_bg.into()),
@@ -2049,8 +2060,10 @@ impl Application for OpenCodeCosmic {
 
             if supports_attachments {
                 footer_items.push(
+                    // GTK's `.composer-menu`: `padding: 0 0.59em` and a
+                    // 2.37em minimum height.
                     button::icon(icons::attach())
-                        .padding([self.space(0.2) as u16, self.space(0.3) as u16])
+                        .padding([self.space(0.2) as u16, self.space(0.59) as u16])
                         .on_press(Message::PickAttachments)
                         .into(),
                 );
@@ -2124,8 +2137,9 @@ impl Application for OpenCodeCosmic {
             );
 
             let usage = self.active_context_usage();
+            let mut status_items: Vec<Element<'_, Message>> = Vec::new();
             if !usage.is_empty() {
-                footer_items.push(
+                status_items.push(
                     text(usage)
                         .size(self.em(0.82))
                         .class(cosmic::theme::Text::Color(palette::current().muted_text))
@@ -2133,18 +2147,26 @@ impl Application for OpenCodeCosmic {
                 );
             }
             if is_busy {
-                footer_items.push(
-                    text("Ctrl + Enter to queue")
-                        .size(self.em(0.82))
-                        .class(cosmic::theme::Text::Color(palette::current().muted_text))
-                        .into(),
+                // GTK's `.queue-hint`: 0.82em text with a 16px left margin, so
+                // the hint keeps its distance from the counter next to it.
+                status_items.push(
+                    container(
+                        text("Ctrl + Enter to queue")
+                            .size(self.em(0.82))
+                            .class(cosmic::theme::Text::Color(palette::current().muted_text)),
+                    )
+                    .padding([0, self.space(1.19) as u16, 0, self.space(1.19) as u16])
+                    .into(),
                 );
             }
 
             let mut action_items: Vec<Element<'_, Message>> = Vec::new();
+            // GTK's `.composer-action`: 2.52em (34px) wide/tall.
+            let action_pad = self.pad_px(9.0);
             if is_busy {
                 action_items.push(
                     button::icon(icons::stop())
+                        .padding(action_pad)
                         .on_press(Message::StopSession)
                         .into(),
                 );
@@ -2152,6 +2174,7 @@ impl Application for OpenCodeCosmic {
             action_items.push(
                 button::icon(icons::send())
                     .class(accent_button_class(self.zoom))
+                    .padding(action_pad)
                     .on_press(Message::SendPrompt(SendMode::Send))
                     .into(),
             );
@@ -2226,24 +2249,43 @@ impl Application for OpenCodeCosmic {
                     .into(),
             );
 
-            let footer = row::with_children(
-                footer_items
-                    .into_iter()
-                    .chain(action_items)
-                    .collect::<Vec<_>>(),
-            )
-            .spacing(self.space(0.59))
-            .align_y(Alignment::Center);
+            // GTK's `.composer-footer-status` keeps 1.19em between the status
+            // row and the action group; the actions themselves are one group.
+            let action_group = row::with_children(action_items)
+                .spacing(self.space(0.59))
+                .align_y(Alignment::Center);
+            footer_items.push(
+                row::with_children(vec![
+                    row::with_children(status_items)
+                        .spacing(0.0)
+                        .align_y(Alignment::Center)
+                        .into(),
+                    action_group.into(),
+                ])
+                .spacing(self.space(1.19))
+                .align_y(Alignment::Center)
+                .into(),
+            );
+
+            let footer = row::with_children(footer_items)
+                .spacing(self.space(0.59))
+                .align_y(Alignment::Center);
 
             composer_items.push(footer.into());
 
             let composer_radius = self.space(0.89);
             let composer_frame = container(
                 column::with_children(composer_items)
-                    .spacing(self.space(0.3))
+                    .spacing(self.space(0.59))
                     .width(Length::Fill),
             )
-            .padding([self.space(0.59) as u16, self.space(0.74) as u16])
+            // GTK's composer box margins: 14px sides, 10px top, 12px bottom.
+            .padding([
+                self.space(0.75) as u16,
+                self.space(1.05) as u16,
+                self.space(0.9) as u16,
+                self.space(1.05) as u16,
+            ])
             .width(Length::Fill)
             .style(move |_theme: &cosmic::Theme| container::Style {
                 background: Some(palette::current().composer_bg.into()),
@@ -2786,6 +2828,32 @@ fn flat_button_class(zoom: f32) -> cosmic::theme::Button {
         border_radius: radius.into(),
         border_width: 0.0,
         text_color: Some(palette::current().header_title_text),
+        ..Default::default()
+    };
+    let hovered = move || cosmic::widget::button::Style {
+        background: Some(palette::current().action_hover_bg.into()),
+        ..base()
+    };
+    cosmic::theme::Button::Custom {
+        active: Box::new(move |_focused, _theme| base()),
+        hovered: Box::new(move |_focused, _theme| hovered()),
+        pressed: Box::new(move |_focused, _theme| base()),
+        disabled: Box::new(move |_theme| base()),
+    }
+}
+
+/// GTK's plain (default) button — Adwaita's `button.bg` with its 1px border,
+/// not one of the client's `@oc_*` styles. Used by the form notice's Cancel and
+/// the modals' default actions, which GTK left unstyled.
+fn plain_button_class(zoom: f32) -> cosmic::theme::Button {
+    let radius = crate::metrics::space(0.5, zoom);
+    let base = move || cosmic::widget::button::Style {
+        background: Some(palette::current().plain_button_bg.into()),
+        border_radius: radius.into(),
+        border_width: 1.0,
+        border_color: palette::current().plain_button_border,
+        text_color: Some(palette::current().plain_button_text),
+        icon_color: Some(palette::current().plain_button_text),
         ..Default::default()
     };
     let hovered = move || cosmic::widget::button::Style {

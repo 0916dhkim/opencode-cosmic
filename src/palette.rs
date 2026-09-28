@@ -204,6 +204,13 @@ pub struct Palette {
     pub tab_active_text: Color,
     /// `@oc_border_message_image` — the outline of an inline message image.
     pub message_image_border: Color,
+    /// GTK's plain (default) button: Adwaita's `@button_bg_color`, not an
+    /// `@oc_*` token. The form notice's Cancel and the modals' default buttons.
+    pub plain_button_bg: Color,
+    /// Adwaita's default button border.
+    pub plain_button_border: Color,
+    /// Adwaita's default button text (`@theme_fg_color`).
+    pub plain_button_text: Color,
 }
 
 pub const LIGHT: Palette = Palette {
@@ -301,6 +308,9 @@ pub const LIGHT: Palette = Palette {
     user_message_border: Color::from_rgb8(0xcf, 0xc6, 0xb6),
     tab_active_text: Color::from_rgb8(0x24, 0x23, 0x21),
     message_image_border: Color::from_rgba8(0x24, 0x23, 0x21, 0.14),
+    plain_button_bg: Color::from_rgb8(0xf8, 0xf7, 0xf7),
+    plain_button_border: Color::from_rgb8(0xcd, 0xc7, 0xc2),
+    plain_button_text: Color::from_rgb8(0x2e, 0x34, 0x36),
 };
 
 pub const DARK: Palette = Palette {
@@ -398,6 +408,9 @@ pub const DARK: Palette = Palette {
     user_message_border: Color::from_rgb8(0x31, 0x3a, 0x41),
     tab_active_text: Color::from_rgb8(0xf2, 0xef, 0xe9),
     message_image_border: Color::from_rgba8(0x00, 0x00, 0x00, 0.0),
+    plain_button_bg: Color::from_rgb8(0x38, 0x38, 0x38),
+    plain_button_border: Color::from_rgb8(0x1b, 0x1b, 0x1b),
+    plain_button_text: Color::from_rgb8(0xdc, 0xdc, 0xda),
 };
 
 /// The palette for the active COSMIC theme; light desktops get [`LIGHT`].
