@@ -48,6 +48,24 @@ pub struct Palette {
     pub modal_bg: Color,
     /// `@oc_border_new_session_palette`
     pub modal_border: Color,
+    /// `@oc_bg_new_session_palette`
+    pub new_session_bg: Color,
+    /// `@oc_border_new_session_palette`
+    pub new_session_border: Color,
+    /// `@oc_shadow_new_session_palette`
+    pub new_session_shadow: Color,
+    /// `@oc_bg_new_session_search`
+    pub new_session_search_bg: Color,
+    /// `@oc_border_new_session_search`
+    pub new_session_search_border: Color,
+    /// `@oc_fg_new_session_path`
+    pub new_session_path_fg: Color,
+    /// `@oc_bg_new_session_row_hover`
+    pub new_session_row_hover_bg: Color,
+    /// `@oc_fg_new_session_row_selected_new_session_name`
+    pub new_session_selected_name_fg: Color,
+    /// `@oc_fg_new_session_row_selected_new_session_path`
+    pub new_session_selected_path_fg: Color,
     /// `@oc_bg_modal_backdrop`
     pub modal_backdrop: Color,
     /// `@oc_bg_settings_rail`
@@ -281,6 +299,15 @@ pub const LIGHT: Palette = Palette {
     prompt_metadata: Color::from_rgb8(0x62, 0x67, 0x64),
     modal_bg: Color::from_rgb8(0xfb, 0xf9, 0xf4),
     modal_border: Color::from_rgb8(0xd0, 0xcc, 0xc4),
+    new_session_bg: Color::from_rgb8(0xfb, 0xf9, 0xf4),
+    new_session_border: Color::from_rgb8(0xd0, 0xcc, 0xc4),
+    new_session_shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
+    new_session_search_bg: Color::from_rgb8(0xf4, 0xf0, 0xe6),
+    new_session_search_border: Color::from_rgb8(0xde, 0xda, 0xd0),
+    new_session_path_fg: Color::from_rgb8(0x8b, 0x91, 0x8e),
+    new_session_row_hover_bg: Color::from_rgb8(0xe8, 0xe4, 0xdb),
+    new_session_selected_name_fg: Color::from_rgb8(0x11, 0x11, 0x10),
+    new_session_selected_path_fg: Color::from_rgb8(0x55, 0x5b, 0x58),
     modal_backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
     settings_rail_bg: Color::from_rgb8(0xf4, 0xf0, 0xe6),
     settings_rail_border: Color::from_rgb8(0xde, 0xd8, 0xcb),
@@ -405,6 +432,15 @@ pub const DARK: Palette = Palette {
     prompt_metadata: Color::from_rgb8(0x9d, 0xa4, 0xaa),
     modal_bg: Color::from_rgb8(0x15, 0x18, 0x1c),
     modal_border: Color::from_rgb8(0x2a, 0x30, 0x38),
+    new_session_bg: Color::from_rgb8(0x15, 0x18, 0x1c),
+    new_session_border: Color::from_rgb8(0x2a, 0x30, 0x38),
+    new_session_shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.65),
+    new_session_search_bg: Color::from_rgb8(0x18, 0x1c, 0x21),
+    new_session_search_border: Color::from_rgb8(0x24, 0x29, 0x30),
+    new_session_path_fg: Color::from_rgb8(0x7d, 0x85, 0x90),
+    new_session_row_hover_bg: Color::from_rgb8(0x25, 0x2d, 0x37),
+    new_session_selected_name_fg: Color::from_rgb8(0xff, 0xff, 0xff),
+    new_session_selected_path_fg: Color::from_rgb8(0x9b, 0xa5, 0xb2),
     modal_backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.65),
     settings_rail_bg: Color::from_rgb8(0x11, 0x14, 0x18),
     settings_rail_border: Color::from_rgb8(0x23, 0x29, 0x30),

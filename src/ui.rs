@@ -86,6 +86,8 @@ pub struct OpenCodeCosmic {
     next_req_id: u64,
     /// Set when the active session changes: the next tick focuses the composer.
     focus_composer: bool,
+    /// Focus a newly opened palette's entry on the next tick, after it exists.
+    focus_modal: Option<DrawerPage>,
     /// UI zoom, mirroring the GTK client's `zoom_level` (0.7 … 1.75).
     zoom: f32,
     /// Locations the server knows (`project.list`), for GTK's new-session
@@ -336,6 +338,7 @@ impl Application for OpenCodeCosmic {
             settings_validation: String::new(),
             next_req_id: 1,
             focus_composer: false,
+            focus_modal: None,
             zoom,
             projects: Vec::new(),
             rename_input: String::new(),
@@ -472,6 +475,7 @@ impl Application for OpenCodeCosmic {
                 // Focus the composer one tick after the active session changed,
                 // so the widget exists by the time the focus operation runs.
                 let focus = std::mem::take(&mut self.focus_composer);
+                let focus_modal = self.focus_modal.take();
                 let picked = self.take_picked_attachments();
                 if let Some(paths) = picked {
                     match crate::api::check_attachments(&paths) {
@@ -487,7 +491,16 @@ impl Application for OpenCodeCosmic {
                 }
                 self.drain_events();
                 let mut tasks = Vec::new();
-                if focus {
+                if let Some(page) = focus_modal.filter(|page| Some(*page) == self.active_drawer) {
+                    let id = match page {
+                        DrawerPage::NewSession => Some(new_session_search_id()),
+                        DrawerPage::Rename => Some(rename_title_id()),
+                        _ => None,
+                    };
+                    if let Some(id) = id {
+                        tasks.push(focus_widget(id));
+                    }
+                } else if focus && self.active_drawer.is_none() {
                     tasks.push(focus_composer());
                 }
                 // GTK's transcript followed the run; the scroll itself reports
@@ -517,6 +530,7 @@ impl Application for OpenCodeCosmic {
             }
             Message::NewSession => {
                 self.active_drawer = Some(DrawerPage::NewSession);
+                self.focus_modal = Some(DrawerPage::NewSession);
                 Task::none()
             }
             Message::CreateSessionIn(directory) => {
@@ -609,6 +623,7 @@ impl Application for OpenCodeCosmic {
                 self.rename_target = self.active_session_id.clone();
                 self.rename_input = self.active_session_title();
                 self.active_drawer = Some(DrawerPage::Rename);
+                self.focus_modal = Some(DrawerPage::Rename);
                 Task::none()
             }
             Message::OpenRenameFor(id) => {
@@ -619,6 +634,7 @@ impl Application for OpenCodeCosmic {
                     .map(|session| session.title.clone())
                     .unwrap_or_default();
                 self.active_drawer = Some(DrawerPage::Rename);
+                self.focus_modal = Some(DrawerPage::Rename);
                 Task::none()
             }
             Message::ModifiersChanged(modifiers) => {
@@ -2672,9 +2688,21 @@ fn transcript_id() -> cosmic::widget::Id {
 
 /// Puts the caret in the prompt composer (its editor has no `focus` helper).
 fn focus_composer() -> Task<Message> {
+    focus_widget(composer_id())
+}
+
+fn focus_widget(id: cosmic::widget::Id) -> Task<Message> {
     cosmic::iced::advanced::widget::operate(
-        cosmic::iced::advanced::widget::operation::focusable::focus(composer_id()),
+        cosmic::iced::advanced::widget::operation::focusable::focus(id),
     )
+}
+
+fn new_session_search_id() -> cosmic::widget::Id {
+    cosmic::widget::Id::new("opencode-new-session-search")
+}
+
+fn rename_title_id() -> cosmic::widget::Id {
+    cosmic::widget::Id::new("opencode-rename-title")
 }
 
 /// Widget id of the prompt composer, so a `Task` can put the caret in it.
@@ -2907,17 +2935,16 @@ fn accent_button_class(zoom: f32) -> cosmic::theme::Button {
     }
 }
 
-/// GTK's `.new-session-row`: flat until hovered, then the row highlight.
-fn modal_row_class(radius: f32) -> cosmic::theme::Button {
+/// GTK's `.new-session-row`: the first row is selected, others highlight on hover.
+fn modal_row_class(selected: bool, radius: f32) -> cosmic::theme::Button {
     let base = move || cosmic::widget::button::Style {
-        background: None,
+        background: selected.then(|| palette::current().new_session_row_hover_bg.into()),
         border_radius: radius.into(),
         border_width: 0.0,
-        text_color: Some(palette::current().header_title_text),
         ..Default::default()
     };
     let hovered = move || cosmic::widget::button::Style {
-        background: Some(palette::current().sidebar_hover_bg.into()),
+        background: Some(palette::current().new_session_row_hover_bg.into()),
         ..base()
     };
     cosmic::theme::Button::Custom {
@@ -2953,6 +2980,33 @@ fn field_input_class() -> cosmic::theme::TextInput {
         hovered: Box::new(move |_theme| appearance(false)),
         focused: Box::new(move |_theme| appearance(true)),
         disabled: Box::new(move |_theme| appearance(false)),
+    }
+}
+
+/// GTK's `.new-session-search` paints the whole band, not an inset entry.
+fn new_session_search_input_class() -> cosmic::theme::TextInput {
+    let appearance = move || {
+        let p = palette::current();
+        cosmic::widget::text_input::Appearance {
+            background: cosmic::iced::Color::TRANSPARENT.into(),
+            border_radius: 0.0.into(),
+            border_offset: None,
+            border_width: 0.0,
+            border_color: p.new_session_search_border,
+            label_color: p.header_title_text,
+            placeholder_color: p.prompt_metadata,
+            selected_text_color: p.header_title_text,
+            icon_color: None,
+            text_color: Some(p.header_title_text),
+            selected_fill: p.accent_bg,
+        }
+    };
+    cosmic::theme::TextInput::Custom {
+        active: Box::new(move |_theme| appearance()),
+        error: Box::new(move |_theme| appearance()),
+        hovered: Box::new(move |_theme| appearance()),
+        focused: Box::new(move |_theme| appearance()),
+        disabled: Box::new(move |_theme| appearance()),
     }
 }
 
@@ -3604,6 +3658,8 @@ impl OpenCodeCosmic {
         title: Option<&str>,
         // GTK's `.app-modal-palette.sessions` has its own background and border.
         sessions_card: bool,
+        // GTK's `.new-session-palette` has no inset card padding.
+        new_session_card: bool,
         body: Element<'a, Message>,
     ) -> Element<'a, Message> {
         let radius = self.space(0.89);
@@ -3630,29 +3686,49 @@ impl OpenCodeCosmic {
             );
         }
         column_items.push(body);
+        let padding = if new_session_card {
+            0.0
+        } else {
+            self.space(1.04)
+        };
+        let shadow_offset = self.space(crate::metrics::px(20.0));
+        let shadow_blur = self.space(crate::metrics::px(48.0));
         let frame = container(
             column::with_children(column_items)
                 .spacing(self.space(0.89))
                 // GTK's `set_size_request` is the card's outer size and iced adds
                 // padding outside a fixed width, so the padding comes off here.
-                .width(Length::Fixed(width - 2.0 * self.space(1.04)))
-                .height(Length::Fixed(height - 2.0 * self.space(1.04))),
+                .width(Length::Fixed(width - 2.0 * padding))
+                .height(Length::Fixed(height - 2.0 * padding)),
         )
-        .padding(self.space(1.04) as u16)
+        .padding(padding)
         .style(move |_theme: &cosmic::Theme| container::Style {
             background: Some(if sessions_card {
                 palette::current().sessions_bg.into()
+            } else if new_session_card {
+                palette::current().new_session_bg.into()
             } else {
                 palette::current().modal_bg.into()
             }),
             border: Border {
                 color: if sessions_card {
                     palette::current().sessions_border
+                } else if new_session_card {
+                    palette::current().new_session_border
                 } else {
                     palette::current().modal_border
                 },
                 width: 1.0,
                 radius: radius.into(),
+            },
+            shadow: if new_session_card {
+                cosmic::iced::Shadow {
+                    color: palette::current().new_session_shadow,
+                    offset: cosmic::iced::Vector::new(0.0, shadow_offset),
+                    blur_radius: shadow_blur,
+                }
+            } else {
+                cosmic::iced::Shadow::default()
             },
             ..Default::default()
         });
@@ -3668,6 +3744,7 @@ impl OpenCodeCosmic {
             self.space(30.75),
             None,
             true,
+            false,
             self.sessions_palette_body(),
         )
     }
@@ -3780,8 +3857,9 @@ impl OpenCodeCosmic {
         let query = self.search_query.to_lowercase();
         let mut rows: Vec<Element<'_, Message>> = Vec::new();
 
-        for project in self.filtered_projects(&query) {
+        for (index, project) in self.filtered_projects(&query).into_iter().enumerate() {
             let radius = self.space(0.44);
+            let selected = index == 0;
             let name = project
                 .name
                 .clone()
@@ -3795,11 +3873,20 @@ impl OpenCodeCosmic {
                                 weight: cosmic::iced::font::Weight::Bold,
                                 ..cosmic::iced::Font::DEFAULT
                             })
+                            .class(cosmic::theme::Text::Color(if selected {
+                                palette::current().new_session_selected_name_fg
+                            } else {
+                                palette::current().header_title_text
+                            }))
                             .width(Length::Fill)
                             .into(),
                         text(project.worktree.clone())
                             .size(self.em(0.81))
-                            .class(cosmic::theme::Text::Color(palette::current().muted_text))
+                            .class(cosmic::theme::Text::Color(if selected {
+                                palette::current().new_session_selected_path_fg
+                            } else {
+                                palette::current().new_session_path_fg
+                            }))
                             .into(),
                     ])
                     .align_y(Alignment::Center)
@@ -3807,7 +3894,7 @@ impl OpenCodeCosmic {
                 )
                 .padding([self.space(0.52) as u16, self.space(0.74) as u16])
                 .width(Length::Fill)
-                .class(modal_row_class(radius))
+                .class(modal_row_class(selected, radius))
                 .on_press(Message::CreateSessionIn(project.worktree.clone()))
                 .into(),
             );
@@ -3822,36 +3909,76 @@ impl OpenCodeCosmic {
             );
         }
 
-        let search_row: Element<'_, Message> = row::with_children(vec![
+        // GTK's `.new-session-search`: full-width top band, rounded only at
+        // the top, with its bottom border supplied by a separate 1px hairline.
+        let radius = self.space(0.81);
+        let search_band = container(
             field_input(
                 "Search projects...",
                 &self.search_query,
                 Message::SearchInput,
             )
-            .width(Length::Fill)
-            .into(),
-        ])
-        .spacing(self.space(0.44))
-        .align_y(Alignment::Center)
-        .into();
+            .id(new_session_search_id())
+            .style(new_session_search_input_class())
+            .size(self.em(0.96))
+            .font(cosmic::iced::Font {
+                weight: cosmic::iced::font::Weight::Medium,
+                ..cosmic::iced::Font::DEFAULT
+            })
+            .padding(0)
+            .width(Length::Fill),
+        )
+        .padding([self.space(0.89), self.space(1.04)])
+        .width(Length::Fill)
+        .style(move |_theme: &cosmic::Theme| container::Style {
+            background: Some(palette::current().new_session_search_bg.into()),
+            border: Border {
+                radius: cosmic::iced::border::Radius {
+                    top_left: radius,
+                    top_right: radius,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        let search = column::with_children(vec![
+            search_band.into(),
+            hairline(palette::current().new_session_search_border),
+        ]);
 
         let list: Element<'_, Message> = scrollable(
-            column::with_children(rows)
-                .spacing(self.space(0.15))
+            container(
+                column::with_children(
+                    rows.into_iter()
+                        .map(|row| container(row).padding([self.space(0.07), 0.0]).into())
+                        .collect::<Vec<Element<'_, Message>>>(),
+                )
                 .width(Length::Fill),
+            )
+            // GTK's `.new-session-list`: 0.3em 0.44em 0.44em.
+            .padding([
+                self.space(0.3),
+                self.space(0.44),
+                self.space(0.44),
+                self.space(0.44),
+            ])
+            .width(Length::Fill),
         )
+        // GTK's ScrolledWindow has `min-content-height: 264px`; the
+        // 310px card leaves at least that much after the search band.
         .height(Length::Fill)
+        .width(Length::Fill)
         .into();
 
-        let body = column::with_children(vec![search_row, list])
-            .spacing(self.space(0.59))
-            .height(Length::Fill);
+        let body = column::with_children(vec![search.into(), list]).height(Length::Fill);
 
         self.modal_frame(
             self.space(26.25),
             self.space(23.25),
             None,
             false,
+            true,
             body.into(),
         )
     }
@@ -3891,18 +4018,18 @@ impl OpenCodeCosmic {
         });
 
         let body_items: Vec<Element<'_, Message>> = vec![
-            text("Session title")
-                .size(self.em(0.82))
-                .class(cosmic::theme::Text::Color(palette::current().muted_text))
+            text("Session title").into(),
+            field_input("Session title", &self.rename_input, Message::RenameInput)
+                .id(rename_title_id())
                 .into(),
-            field_input("Session title", &self.rename_input, Message::RenameInput).into(),
-            text("Session ID")
-                .size(self.em(0.82))
-                .class(cosmic::theme::Text::Color(palette::current().muted_text))
-                .into(),
+            text("Session ID").into(),
             id_field.into(),
             row::with_children(vec![
-                button::text("Cancel").on_press(Message::CloseDrawer).into(),
+                fill_spacer(),
+                button::text("Cancel")
+                    .class(plain_button_class(self.zoom))
+                    .on_press(Message::CloseDrawer)
+                    .into(),
                 button::text("Save")
                     .class(accent_button_class(self.zoom))
                     .on_press(Message::ApplyRename)
@@ -3912,14 +4039,17 @@ impl OpenCodeCosmic {
             .into(),
         ];
 
-        let body = column::with_children(body_items)
-            .spacing(self.space(0.44))
-            .height(Length::Fill);
+        // GTK's rename root: 18px margins and 10px spacing; the actions
+        // follow the ID field rather than sitting at the card's bottom.
+        let body = container(column::with_children(body_items).spacing(self.pad_px(10.0)))
+            // `modal_frame` already supplies 1.04em of the 18px margin.
+            .padding((self.space(crate::metrics::px(18.0)) - self.space(1.04)).max(0.0));
 
         self.modal_frame(
             self.space(26.25),
             self.space(23.25),
             None,
+            false,
             false,
             body.into(),
         )
