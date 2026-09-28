@@ -48,6 +48,26 @@ pub struct Palette {
     pub modal_bg: Color,
     /// `@oc_border_new_session_palette`
     pub modal_border: Color,
+    /// `@oc_bg_modal_backdrop`
+    pub modal_backdrop: Color,
+    /// `@oc_bg_settings_rail`
+    pub settings_rail_bg: Color,
+    /// `@oc_border_settings_rail`
+    pub settings_rail_border: Color,
+    /// `@oc_fg_button_settings_rail_item`
+    pub settings_rail_item_fg: Color,
+    /// `@oc_bg_button_settings_rail_item_hover`
+    pub settings_rail_item_hover_bg: Color,
+    /// `@oc_fg_button_settings_rail_item_hover`
+    pub settings_rail_item_hover_fg: Color,
+    /// `@oc_bg_button_settings_rail_item_active`
+    pub settings_rail_item_active_bg: Color,
+    /// `@oc_fg_button_settings_rail_item_active`
+    pub settings_rail_item_active_fg: Color,
+    /// `@oc_fg_rail_badge`
+    pub rail_badge_fg: Color,
+    /// `@oc_border_settings_topbar`
+    pub settings_topbar_border: Color,
     /// `@oc_bg_queue_tray`
     pub tray_bg: Color,
     /// `@oc_border_queue_tray`
@@ -237,6 +257,16 @@ pub const LIGHT: Palette = Palette {
     prompt_metadata: Color::from_rgb8(0x62, 0x67, 0x64),
     modal_bg: Color::from_rgb8(0xfb, 0xf9, 0xf4),
     modal_border: Color::from_rgb8(0xd0, 0xcc, 0xc4),
+    modal_backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.4),
+    settings_rail_bg: Color::from_rgb8(0xf4, 0xf0, 0xe6),
+    settings_rail_border: Color::from_rgb8(0xde, 0xd8, 0xcb),
+    settings_rail_item_fg: Color::from_rgb8(0x63, 0x6b, 0x74),
+    settings_rail_item_hover_bg: Color::from_rgba(0.0, 0.0, 0.0, 0.04),
+    settings_rail_item_hover_fg: Color::from_rgb8(0x1a, 0x1e, 0x23),
+    settings_rail_item_active_bg: Color::from_rgba(0.0, 0.0, 0.0, 0.07),
+    settings_rail_item_active_fg: Color::from_rgb8(0x11, 0x11, 0x10),
+    rail_badge_fg: Color::from_rgb8(0x8b, 0x92, 0x9a),
+    settings_topbar_border: Color::from_rgb8(0xde, 0xd8, 0xcb),
     tray_bg: Color::from_rgb8(0xf0, 0xee, 0xe9),
     tray_border: Color::from_rgb8(0xcb, 0xc7, 0xbf),
     composer_bg: Color::from_rgb8(0xff, 0xff, 0xff),
@@ -339,6 +369,16 @@ pub const DARK: Palette = Palette {
     prompt_metadata: Color::from_rgb8(0x9d, 0xa4, 0xaa),
     modal_bg: Color::from_rgb8(0x15, 0x18, 0x1c),
     modal_border: Color::from_rgb8(0x2a, 0x30, 0x38),
+    modal_backdrop: Color::from_rgba(0.0, 0.0, 0.0, 0.65),
+    settings_rail_bg: Color::from_rgb8(0x11, 0x14, 0x18),
+    settings_rail_border: Color::from_rgb8(0x23, 0x29, 0x30),
+    settings_rail_item_fg: Color::from_rgb8(0x8b, 0x94, 0x9e),
+    settings_rail_item_hover_bg: Color::from_rgba(1.0, 1.0, 1.0, 0.04),
+    settings_rail_item_hover_fg: Color::from_rgb8(0xed, 0xf1, 0xf5),
+    settings_rail_item_active_bg: Color::from_rgba(1.0, 1.0, 1.0, 0.08),
+    settings_rail_item_active_fg: Color::from_rgb8(0xed, 0xf1, 0xf5),
+    rail_badge_fg: Color::from_rgb8(0x6a, 0x74, 0x82),
+    settings_topbar_border: Color::from_rgb8(0x23, 0x29, 0x30),
     tray_bg: Color::from_rgb8(0x15, 0x18, 0x1b),
     tray_border: Color::from_rgb8(0x2d, 0x32, 0x36),
     composer_bg: Color::from_rgb8(0x19, 0x1c, 0x1f),

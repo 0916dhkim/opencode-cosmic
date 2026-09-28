@@ -18,7 +18,7 @@ use serde::Deserialize;
 use crate::{
     Args,
     api::{ApiConfig, ApiHandle, Command, UiEvent},
-    credentials::CloudflareAccessCredentials,
+    credentials::{self, CloudflareAccessCredentials, PasswordTarget, SystemKeyring},
     icons,
     jobs::{self, JobKind},
     markdown,
@@ -75,6 +75,14 @@ pub struct OpenCodeCosmic {
     server_url_input: String,
     username_input: String,
     password_input: String,
+    current_password: Option<String>,
+    password_stored: bool,
+    remember_password: bool,
+    cloudflare_client_id_input: String,
+    cloudflare_client_secret_input: String,
+    cloudflare_access: Option<CloudflareAccessCredentials>,
+    settings_page: SettingsPage,
+    settings_validation: String,
     next_req_id: u64,
     /// Set when the active session changes: the next tick focuses the composer.
     focus_composer: bool,
@@ -205,6 +213,10 @@ pub enum Message {
     SettingsUrlInput(String),
     SettingsUsernameInput(String),
     SettingsPasswordInput(String),
+    SettingsRememberPassword(bool),
+    SettingsCloudflareClientIdInput(String),
+    SettingsCloudflareClientSecretInput(String),
+    SettingsPage(SettingsPage),
     ApplySettings,
     DismissError,
     /// The headerbar was dragged (GTK's headerbar moved the window).
@@ -215,6 +227,12 @@ pub enum Message {
     HeaderMinimize,
     /// The headerbar's close button.
     HeaderClose,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsPage {
+    Connection,
+    Sessions,
 }
 
 impl Application for OpenCodeCosmic {
@@ -254,6 +272,34 @@ impl Application for OpenCodeCosmic {
             .username
             .clone()
             .unwrap_or_else(|| state.connection.username.clone());
+        let password_load = credentials::initial_password(
+            &SystemKeyring,
+            &server_url,
+            &username,
+            flags.password.clone(),
+            state.connection.basic_auth_in_keyring,
+            state.connection.basic_auth_in_keyring,
+        );
+        let (cloudflare_access, cloudflare_warning) = if let (Some(id), Some(secret)) = (
+            flags.cf_access_client_id.as_ref(),
+            flags.cf_access_client_secret.as_ref(),
+        ) {
+            (
+                CloudflareAccessCredentials::new(id.clone(), secret.clone()).ok(),
+                None,
+            )
+        } else if state.connection.cloudflare_access {
+            match credentials::load(&server_url) {
+                Ok(access) => (access, None),
+                Err(error) => (None, Some(error.to_string())),
+            }
+        } else {
+            (None, None)
+        };
+        let cloudflare_client_id_input = cloudflare_access
+            .as_ref()
+            .map(|access| access.client_id.clone())
+            .unwrap_or_default();
 
         let mut app = Self {
             core,
@@ -276,10 +322,18 @@ impl Application for OpenCodeCosmic {
             sidebar_open: true,
             connection_status: "Connecting".to_string(),
             connection_status_error: false,
-            error_banner: None,
+            error_banner: password_load.warning.or(cloudflare_warning),
             server_url_input: server_url,
             username_input: username,
-            password_input: flags.password.clone().unwrap_or_default(),
+            password_input: String::new(),
+            current_password: password_load.password,
+            password_stored: password_load.stored,
+            remember_password: true,
+            cloudflare_client_id_input,
+            cloudflare_client_secret_input: String::new(),
+            cloudflare_access,
+            settings_page: SettingsPage::Connection,
+            settings_validation: String::new(),
             next_req_id: 1,
             focus_composer: false,
             zoom,
@@ -682,6 +736,13 @@ impl Application for OpenCodeCosmic {
                     self.active_drawer = None;
                 } else {
                     self.active_drawer = Some(page);
+                    if page == DrawerPage::Settings {
+                        self.settings_page = SettingsPage::Connection;
+                        self.settings_validation.clear();
+                        self.password_input.clear();
+                        self.cloudflare_client_secret_input.clear();
+                        self.remember_password = true;
+                    }
                 }
                 Task::none()
             }
@@ -716,6 +777,22 @@ impl Application for OpenCodeCosmic {
             }
             Message::SettingsPasswordInput(pwd) => {
                 self.password_input = pwd;
+                Task::none()
+            }
+            Message::SettingsRememberPassword(remember) => {
+                self.remember_password = remember;
+                Task::none()
+            }
+            Message::SettingsCloudflareClientIdInput(id) => {
+                self.cloudflare_client_id_input = id;
+                Task::none()
+            }
+            Message::SettingsCloudflareClientSecretInput(secret) => {
+                self.cloudflare_client_secret_input = secret;
+                Task::none()
+            }
+            Message::SettingsPage(page) => {
+                self.settings_page = page;
                 Task::none()
             }
             Message::ApplySettings => {
@@ -2853,6 +2930,40 @@ fn modal_row_class(radius: f32) -> cosmic::theme::Button {
     }
 }
 
+/// GTK's `button.settings-rail-item`: normal, hover and active token pairs.
+fn settings_rail_item_class(active: bool, radius: f32) -> cosmic::theme::Button {
+    let style = move |hovered: bool| {
+        let p = palette::current();
+        let (background, foreground) = if active {
+            (
+                Some(p.settings_rail_item_active_bg.into()),
+                p.settings_rail_item_active_fg,
+            )
+        } else if hovered {
+            (
+                Some(p.settings_rail_item_hover_bg.into()),
+                p.settings_rail_item_hover_fg,
+            )
+        } else {
+            (None, p.settings_rail_item_fg)
+        };
+        cosmic::widget::button::Style {
+            background,
+            text_color: Some(foreground),
+            icon_color: Some(foreground),
+            border_radius: radius.into(),
+            border_width: 0.0,
+            ..Default::default()
+        }
+    };
+    cosmic::theme::Button::Custom {
+        active: Box::new(move |_focused, _theme| style(false)),
+        hovered: Box::new(move |_focused, _theme| style(true)),
+        pressed: Box::new(move |_focused, _theme| style(false)),
+        disabled: Box::new(move |_theme| style(false)),
+    }
+}
+
 /// GTK's `.sidebar-new-session` / `.sidebar-nav`: flat, the label and its icon
 /// in `@oc_fg_sidebar_new_session`, with the sidebar's hover fill.
 fn sidebar_row_class(zoom: f32) -> cosmic::theme::Button {
@@ -3411,6 +3522,10 @@ impl OpenCodeCosmic {
 
     /// GTK's session picker: a search field over the session list.
     fn sessions_palette(&self) -> Element<'_, Message> {
+        self.modal_frame("Sessions", self.sessions_palette_body())
+    }
+
+    fn sessions_palette_body(&self) -> Element<'_, Message> {
         let mut body_items: Vec<Element<'_, Message>> = Vec::new();
 
         body_items.push(
@@ -3471,13 +3586,10 @@ impl OpenCodeCosmic {
             .into(),
         );
 
-        self.modal_frame(
-            "Sessions",
-            column::with_children(body_items)
-                .spacing(self.space(0.44))
-                .height(Length::Fill)
-                .into(),
-        )
+        column::with_children(body_items)
+            .spacing(self.space(0.44))
+            .height(Length::Fill)
+            .into()
     }
 
     /// GTK's new-session palette: search over the known locations.
@@ -3619,35 +3731,281 @@ impl OpenCodeCosmic {
     }
 
     fn settings_palette(&self) -> Element<'_, Message> {
-        let label = |value: &'static str| -> Element<'static, Message> {
-            text(value)
+        let active = self.settings_page;
+        let rail_items = [
+            (SettingsPage::Connection, icons::connection(), "Connection"),
+            (SettingsPage::Sessions, icons::sessions(), "Sessions"),
+        ];
+        let mut rail_content: Vec<Element<'_, Message>> = vec![
+            container(
+                text("Settings")
+                    .size(self.em(1.15))
+                    .font(cosmic::iced::Font {
+                        weight: cosmic::iced::font::Weight::Bold,
+                        ..cosmic::iced::Font::DEFAULT
+                    }),
+            )
+            .padding([self.pad_px(4.0), 0, self.pad_px(12.0), self.pad_px(8.0)])
+            .into(),
+        ];
+        for (page, icon, label) in rail_items {
+            rail_content.push(
+                button::custom(
+                    row::with_children(vec![
+                        inline_icon(icon, self.zoom).into(),
+                        text(label)
+                            .size(self.em(0.9))
+                            .font(cosmic::iced::Font {
+                                weight: if page == active {
+                                    cosmic::iced::font::Weight::Bold
+                                } else {
+                                    cosmic::iced::font::Weight::Medium
+                                },
+                                ..cosmic::iced::Font::DEFAULT
+                            })
+                            .into(),
+                    ])
+                    .spacing(self.pad_px(8.0))
+                    .align_y(Alignment::Center),
+                )
+                .width(Length::Fill)
+                .height(Length::Fixed(self.space(2.0)))
+                .padding([self.space(0.25) as u16, self.space(0.6) as u16])
+                .class(settings_rail_item_class(page == active, self.space(0.35)))
+                .on_press(Message::SettingsPage(page))
+                .into(),
+            );
+        }
+        // GTK's `.settings-rail-footer` expands downwards; its host is elided
+        // in the middle rather than allowing a long URL to widen the rail.
+        let hostname = url::Url::parse(&self.server_url_input)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .unwrap_or_else(|| "remote".to_owned());
+        rail_content.push(
+            container(
+                column::with_children(vec![
+                    text(hostname)
+                        .size(self.em(0.74))
+                        .wrapping(cosmic::iced::widget::text::Wrapping::None)
+                        .ellipsize(cosmic::iced::widget::text::Ellipsize::Middle(
+                            cosmic::iced::core::text::EllipsizeHeightLimit::Lines(1),
+                        ))
+                        .width(Length::Fill)
+                        .into(),
+                    text(format!("opencode-gtk v{}", env!("CARGO_PKG_VERSION")))
+                        .size(self.em(0.74))
+                        .into(),
+                ])
+                .spacing(self.pad_px(2.0)),
+            )
+            .height(Length::Fill)
+            .align_y(Alignment::End)
+            .padding([
+                self.space(0.59),
+                self.space(0.59),
+                self.space(0.3),
+                self.space(0.59),
+            ])
+            .style(|_theme: &cosmic::Theme| container::Style {
+                text_color: Some(palette::current().rail_badge_fg),
+                ..Default::default()
+            })
+            .into(),
+        );
+        let rail_rule = container(row::with_children(Vec::<Element<'_, Message>>::new()))
+            .width(Length::Fixed(1.0))
+            .height(Length::Fill)
+            .style(|_theme: &cosmic::Theme| container::Style {
+                background: Some(palette::current().settings_rail_border.into()),
+                ..Default::default()
+            });
+        let rail_body = container(column::with_children(rail_content).spacing(self.space(0.15)))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .padding([self.space(1.0), self.space(0.6)]);
+        let rail_radius = self.space(0.81);
+        let rail = container(row::with_children(vec![rail_body.into(), rail_rule.into()]))
+            // GTK's `.settings-rail`: 12.5em, right border, left rounded corners.
+            .width(Length::Fixed(self.space(12.5)))
+            .height(Length::Fill)
+            .style(move |_theme: &cosmic::Theme| container::Style {
+                background: Some(palette::current().settings_rail_bg.into()),
+                border: Border {
+                    radius: cosmic::iced::border::Radius {
+                        top_left: rail_radius,
+                        bottom_left: rail_radius,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+
+        let page = match active {
+            SettingsPage::Connection => self.settings_connection_page(),
+            SettingsPage::Sessions => self.sessions_palette_body(),
+        };
+        let radius = self.space(0.81);
+        let frame = container(row::with_children(vec![rail.into(), page]))
+            // GTK `show_settings`: 820 × 640 logical pixels at the UI zoom.
+            .width(Length::Fixed(self.space(crate::metrics::px(820.0))))
+            .height(Length::Fixed(self.space(crate::metrics::px(640.0))))
+            .style(move |_theme: &cosmic::Theme| container::Style {
+                background: Some(palette::current().modal_bg.into()),
+                border: Border {
+                    color: palette::current().modal_border,
+                    width: 1.0,
+                    radius: radius.into(),
+                },
+                ..Default::default()
+            });
+        // The dialog fills its overlay; the frame remains centred above GTK's
+        // `.modal-backdrop` tint instead of tinting the modal itself.
+        container(frame)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .style(|_theme: &cosmic::Theme| container::Style {
+                background: Some(palette::current().modal_backdrop.into()),
+                ..Default::default()
+            })
+            .into()
+    }
+
+    fn settings_connection_page(&self) -> Element<'_, Message> {
+        let heading = text("Server Connection")
+            .size(self.em(1.15))
+            .font(cosmic::iced::Font {
+                weight: cosmic::iced::font::Weight::Bold,
+                ..cosmic::iced::Font::DEFAULT
+            });
+        let muted = |label: &'static str| -> Element<'static, Message> {
+            text(label)
                 .size(self.em(0.82))
                 .class(cosmic::theme::Text::Color(palette::current().muted_text))
                 .into()
         };
+        let topbar = container(
+            row::with_children(vec![
+                column::with_children(vec![
+                    heading.into(),
+                    muted("Configure server endpoint, credentials, and Cloudflare tokens"),
+                ])
+                .spacing(self.pad_px(2.0))
+                .width(Length::Fill)
+                .into(),
+                muted("Esc to cancel"),
+            ])
+            .align_y(Alignment::Center),
+        )
+        // GTK's `.settings-topbar`: 1.33em 1.78em 1.04em.
+        .padding([
+            self.space(1.33),
+            self.space(1.78),
+            self.space(1.04),
+            self.space(1.78),
+        ]);
+        let topbar = column::with_children(vec![
+            topbar.into(),
+            hairline(palette::current().settings_topbar_border),
+        ]);
 
+        let password_placeholder = if self.password_stored {
+            "Stored in the system keyring"
+        } else if self.current_password.is_some() {
+            "Leave blank to keep the current password"
+        } else {
+            "Required by OpenCode 2.x"
+        };
+        let cloudflare_placeholder = if self.cloudflare_access.is_some() {
+            "Stored in the system keyring"
+        } else {
+            "Optional"
+        };
         let body = column::with_children(vec![
-            label("OpenCode Server URL"),
-            text_input("https://...", &self.server_url_input)
+            text("OpenCode server URL").into(),
+            text_input("https://opencode.example.com", &self.server_url_input)
                 .on_input(Message::SettingsUrlInput)
+                .width(Length::Fill)
                 .into(),
-            label("Username"),
-            text_input("opencode", &self.username_input)
+            text("Username").into(),
+            text_input("", &self.username_input)
                 .on_input(Message::SettingsUsernameInput)
+                .width(Length::Fill)
                 .into(),
-            label("Password"),
-            text_input("Password", &self.password_input)
+            text("Password").into(),
+            text_input(password_placeholder, &self.password_input)
                 .on_input(Message::SettingsPasswordInput)
                 .password()
+                .width(Length::Fill)
                 .into(),
-            button::text("Save & Connect")
+            cosmic::widget::checkbox(self.remember_password)
+            .label("Remember the password in the system keyring")
+            .on_toggle(Message::SettingsRememberPassword)
+            .into(),
+            text("Remote servers require HTTPS. Loopback HTTP is supported for SSH tunnels. A remembered password is used only for this server URL and username; uncheck Remember to remove it.")
+                .size(self.em(0.82))
+                .class(cosmic::theme::Text::Color(palette::current().muted_text))
+                .width(Length::Fill)
+                .into(),
+            hairline(palette::current().settings_topbar_border),
+            text("Cloudflare Access service token").into(),
+            text("Client ID").into(),
+            text_input("Optional", &self.cloudflare_client_id_input)
+                .on_input(Message::SettingsCloudflareClientIdInput)
+                .width(Length::Fill)
+                .into(),
+            text("Client secret").into(),
+            text_input(cloudflare_placeholder, &self.cloudflare_client_secret_input)
+                .on_input(Message::SettingsCloudflareClientSecretInput)
+                .password()
+                .width(Length::Fill)
+                .into(),
+            text("The token is sent only to HTTPS servers and stored in the Linux system keyring. Clear the client ID to remove it.")
+                .size(self.em(0.82))
+                .class(cosmic::theme::Text::Color(palette::current().muted_text))
+                .width(Length::Fill)
+                .into(),
+            text(&self.settings_validation)
+                .size(self.em(0.82))
+                .class(cosmic::theme::Text::Color(palette::current().connection_status_error))
+                .into(),
+        ])
+        .spacing(self.space(crate::metrics::px(10.0)))
+        .width(Length::Fill);
+        let body = scrollable(
+            container(body)
+                .padding([self.pad_px(16.0), self.pad_px(24.0)])
+                .width(Length::Fill),
+        )
+        .height(Length::Fill)
+        .width(Length::Fill);
+        let bottom = row::with_children(vec![
+            text("Secrets stay out of the state file")
+                .size(self.em(0.82))
+                .class(cosmic::theme::Text::Color(palette::current().muted_text))
+                .width(Length::Fill)
+                .into(),
+            button::text("Cancel").on_press(Message::CloseDrawer).into(),
+            button::text("Apply")
+                .class(accent_button_class(self.zoom))
                 .on_press(Message::ApplySettings)
                 .into(),
         ])
-        .spacing(self.space(0.59))
-        .height(Length::Fill);
-
-        self.modal_frame("Connection Settings", body.into())
+        .spacing(self.space(0.74))
+        .align_y(Alignment::Center);
+        let bottom = column::with_children(vec![
+            hairline(palette::current().settings_topbar_border),
+            container(bottom)
+                .padding([self.space(0.89), self.space(1.78)])
+                .into(),
+        ]);
+        column::with_children(vec![topbar.into(), body.into(), bottom.into()])
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     /// GTK's compact transcript status pill (`.transcript-status-compact`):
@@ -3733,19 +4091,8 @@ impl OpenCodeCosmic {
         let config = ApiConfig {
             base_url: self.server_url_input.clone(),
             username: self.username_input.clone(),
-            password: if self.password_input.is_empty() {
-                None
-            } else {
-                Some(self.password_input.clone())
-            },
-            cloudflare_access: self.args.cf_access_client_id.as_ref().and_then(|id| {
-                self.args.cf_access_client_secret.as_ref().map(|secret| {
-                    CloudflareAccessCredentials {
-                        client_id: id.clone(),
-                        client_secret: secret.clone(),
-                    }
-                })
-            }),
+            password: self.current_password.clone(),
+            cloudflare_access: self.cloudflare_access.clone(),
         };
 
         match ApiHandle::start(config) {
@@ -4561,10 +4908,82 @@ impl OpenCodeCosmic {
     }
 
     fn reconnect_with_settings(&mut self) {
-        self.state.connection.server = self.server_url_input.clone();
-        self.state.connection.username = self.username_input.clone();
+        let server = self.server_url_input.trim().to_owned();
+        let username = self.username_input.trim().to_owned();
+        if server.is_empty() || username.is_empty() {
+            self.settings_validation = "Server URL and username are required".to_owned();
+            return;
+        }
+        let password_plan = credentials::plan_password(
+            &SystemKeyring,
+            PasswordTarget {
+                server: &self.state.connection.server,
+                username: &self.state.connection.username,
+            },
+            self.current_password.as_deref(),
+            self.password_stored,
+            PasswordTarget {
+                server: &server,
+                username: &username,
+            },
+            &self.password_input,
+            self.remember_password,
+        );
+        let client_id = self.cloudflare_client_id_input.trim();
+        let secret = self.cloudflare_client_secret_input.trim();
+        let cloudflare_access = if client_id.is_empty() && secret.is_empty() {
+            None
+        } else if secret.is_empty() {
+            match self
+                .cloudflare_access
+                .as_ref()
+                .filter(|access| access.client_id == client_id)
+            {
+                Some(access) => Some(access.clone()),
+                None => {
+                    self.settings_validation =
+                        "Cloudflare Access client secret is required".to_owned();
+                    return;
+                }
+            }
+        } else {
+            match CloudflareAccessCredentials::new(client_id.to_owned(), secret.to_owned()) {
+                Ok(access) => Some(access),
+                Err(error) => {
+                    self.settings_validation = error.to_string();
+                    return;
+                }
+            }
+        };
+        if let Some(access) = &cloudflare_access {
+            if let Err(error) = credentials::save(&server, access) {
+                self.settings_validation = error.to_string();
+                return;
+            }
+        } else if self.cloudflare_access.is_some()
+            && crate::api::mount_root(&self.state.connection.server)
+                .ok()
+                .is_some_and(|current| crate::api::mount_root(&server).ok() == Some(current))
+            && let Err(error) = credentials::remove(&server)
+        {
+            self.settings_validation = error.to_string();
+            return;
+        }
+        let (stored, warning) =
+            credentials::apply_password_change(&SystemKeyring, &server, &username, &password_plan);
+        self.password_stored = stored;
+        self.current_password = password_plan.password;
+        self.cloudflare_access = cloudflare_access;
+        self.server_url_input = server.clone();
+        self.username_input = username.clone();
+        self.state.connection.server = server;
+        self.state.connection.username = username;
+        self.state.connection.basic_auth_in_keyring = stored;
+        self.state.connection.cloudflare_access = self.cloudflare_access.is_some();
+        if let Some(warning) = warning {
+            self.error_banner = Some(warning);
+        }
         let _ = self.state.save(&default_path());
-
         self.connect_api();
         self.active_drawer = None;
     }
