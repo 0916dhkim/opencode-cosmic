@@ -252,6 +252,28 @@ fn span<'a>(run: &Run, base_bold: bool) -> Span<'a, ()> {
     span
 }
 
+/// The code block's copy button: GTK's `button.markdown-code-copy` glyph takes
+/// the markdown code-language colour, not the default text colour.
+fn copy_button_class() -> cosmic::theme::Button {
+    let base = || cosmic::widget::button::Style {
+        background: None,
+        ..Default::default()
+    };
+    let tinted = || cosmic::widget::button::Style {
+        text_color: Some(palette::current().code_language_text),
+        // An icon button takes `icon_color`, not `text_color`.
+        icon_color: Some(palette::current().code_language_text),
+        background: None,
+        ..Default::default()
+    };
+    cosmic::theme::Button::Custom {
+        active: Box::new(move |_focused, _theme| tinted()),
+        hovered: Box::new(move |_focused, _theme| tinted()),
+        pressed: Box::new(move |_focused, _theme| tinted()),
+        disabled: Box::new(move |_theme| base()),
+    }
+}
+
 fn spans<'a>(runs: &[Run], base_bold: bool) -> Vec<Span<'a, ()>> {
     runs.iter().map(|run| span(run, base_bold)).collect()
 }
@@ -309,6 +331,10 @@ where
                             .width(Length::Fill)
                             .into(),
                         button::icon(crate::icons::copy())
+                            // GTK's copy glyph is `@oc_fg_markdown_code_language`
+                            // (measured (111,116,113)); the port used the default
+                            // text colour, measured (39,39,39).
+                            .class(copy_button_class())
                             // GTK's `button.markdown-code-copy` is 1.93em
                             // square (25.7px), which sets the header's height;
                             // the icon is 12px, so the padding carries the rest.

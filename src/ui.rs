@@ -911,7 +911,9 @@ impl Application for OpenCodeCosmic {
                 .is_some_and(|drag| drag.to == position && drag.from != position);
             let tab_card = container(tab_row)
                 .width(Length::Fill)
-                .height(Length::Fixed(self.em(2.6) as f32))
+                // GTK's `.session-tab { min-height: 2.6em }` resolves against the
+                // sidebar's 0.96em font (33.3px), not the base 13.33px one.
+                .height(Length::Fixed(self.space(2.6 * 0.96)))
                 .padding([0, self.space(0.3) as u16])
                 .style(move |_theme: &cosmic::Theme| {
                     // GTK marked the dragged row and the drop position.
@@ -2079,6 +2081,9 @@ impl Application for OpenCodeCosmic {
                     // GTK's `.composer-menu`: `padding: 0 0.59em` and a
                     // 2.37em minimum height.
                     button::icon(icons::attach())
+                        // GTK's glyph measures 8x12px; 16px rendered 8x10 and
+                        // 20px overshot to 10x14.
+                        .icon_size(self.em(1.28) as u16)
                         .padding([self.space(0.2) as u16, self.space(0.59) as u16])
                         .on_press(Message::PickAttachments)
                         .into(),
@@ -3115,7 +3120,9 @@ impl OpenCodeCosmic {
         // GTK drew the toggle's panel glyph and the window buttons at a fixed
         // 16px, inside boxes sized by `em` (the toggle) and by Adwaita's
         // window controls (the buttons).
-        let glyph: u16 = 16;
+        // GTK draws 7px window-control glyphs; the port's measured 10px, so the
+        // icons are 14px with the SVGs' glyphs normalised to 8 of a 16-unit viewBox.
+        let glyph: u16 = 14;
         let toggle_size = self.space(2.07);
         let toggle = button::icon(icons::panel())
             .icon_size(glyph)
