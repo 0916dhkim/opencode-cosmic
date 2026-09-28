@@ -825,6 +825,13 @@ impl Application for OpenCodeCosmic {
             } else {
                 row::with_children(marker_items).into()
             };
+            // GTK's `.session-tab-hint` carries `margin-right: 0.22em` and
+            // `.session-tab-title` a `padding-left: 0.22em`; without the pair
+            // the dot sits against the title (and the title fits an extra
+            // character before its ellipsis).
+            let status_marker: Element<'_, Message> = container(status_marker)
+                .padding([0.0_f32, self.space(0.44), 0.0, 0.0])
+                .into();
 
             // GTK: a finished run or unread output recolours the title (both
             // bold), the active row uses the active-title colour, and the rest
