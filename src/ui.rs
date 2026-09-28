@@ -3223,6 +3223,44 @@ fn fuzzy_score(query: &str, target: &str) -> Option<i64> {
     Some(score - (t_lower.len() as i64) / 4)
 }
 
+/// GTK's `filter_tab_sessions` (ui.rs:8504) and its `SESSION_PICKER_LIMIT`:
+/// fuzzy over the title and the directory, the tabs' own order for an empty
+/// query, otherwise by score and then by that order, capped at 200 rows.
+fn filter_tab_sessions<'a>(
+    tabs: &'a [String],
+    sessions: &'a std::collections::HashMap<String, model::Session>,
+    query: &str,
+) -> Vec<&'a model::Session> {
+    let query = query.trim();
+    let mut scored: Vec<(i64, usize, &'a model::Session)> = tabs
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, id)| {
+            let session = sessions.get(id)?;
+            if session.parent_id.is_some() {
+                return None;
+            }
+            if query.is_empty() {
+                return Some((0, idx, session));
+            }
+            let title_score = fuzzy_score(query, &session.title);
+            let dir_score = fuzzy_score(query, &session.directory);
+            match (title_score, dir_score) {
+                (Some(a), Some(b)) => Some((a.max(b), idx, session)),
+                (a, b) => a.or(b).map(|score| (score, idx, session)),
+            }
+        })
+        .collect();
+    if !query.is_empty() {
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    }
+    scored
+        .into_iter()
+        .take(200)
+        .map(|(_, _, session)| session)
+        .collect()
+}
+
 /// GTK's `project_paths` (ui.rs:9115): project worktrees then session
 /// directories, deduplicated in that order.
 fn project_paths(projects: &[model::Project], sessions: &[&model::Session]) -> Vec<String> {
@@ -4238,14 +4276,9 @@ impl OpenCodeCosmic {
             .into(),
         );
 
-        let q = self.search_query.to_lowercase();
-        let mut filtered_sessions: Vec<_> = self
-            .sessions
-            .values()
-            .filter(|s| s.parent_id.is_none())
-            .filter(|s| q.is_empty() || s.title.to_lowercase().contains(&q))
-            .collect();
-        filtered_sessions.sort_by_key(|s| std::cmp::Reverse(s.time.updated));
+        // GTK's picker keeps the tabs' order and matches fuzzily; the port
+        // sorted by update time and matched substrings.
+        let filtered_sessions = filter_tab_sessions(&self.tabs, &self.sessions, &self.search_query);
 
         let mut rows: Vec<Element<'_, Message>> = Vec::new();
         for session in filtered_sessions {
