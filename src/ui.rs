@@ -2930,6 +2930,44 @@ fn modal_row_class(radius: f32) -> cosmic::theme::Button {
     }
 }
 
+/// GTK's `.entry`: white fill, 1px border, the accent while focused. Every
+/// `text_input` in the app uses it (the composer's editor is not a text_input).
+fn field_input_class() -> cosmic::theme::TextInput {
+    let appearance = move |focused: bool| {
+        let p = palette::current();
+        cosmic::widget::text_input::Appearance {
+            background: p.composer_bg.into(),
+            border_radius: 4.0.into(),
+            border_offset: None,
+            border_width: 1.0,
+            border_color: if focused { p.accent_bg } else { p.modal_border },
+            label_color: p.muted_text,
+            placeholder_color: p.prompt_metadata,
+            selected_text_color: p.content_text,
+            icon_color: Some(p.muted_text),
+            text_color: Some(p.content_text),
+            selected_fill: p.accent_bg,
+        }
+    };
+    cosmic::theme::TextInput::Custom {
+        active: Box::new(move |_theme| appearance(false)),
+        error: Box::new(move |_theme| appearance(true)),
+        hovered: Box::new(move |_theme| appearance(false)),
+        focused: Box::new(move |_theme| appearance(true)),
+        disabled: Box::new(move |_theme| appearance(false)),
+    }
+}
+
+fn field_input<'a>(
+    placeholder: &'a str,
+    value: &'a str,
+    on_input: impl Fn(String) -> Message + 'a,
+) -> cosmic::widget::TextInput<'a, Message> {
+    text_input(placeholder, value)
+        .on_input(on_input)
+        .style(field_input_class())
+}
+
 /// GTK's `button.settings-rail-item`: normal, hover and active token pairs.
 fn settings_rail_item_class(active: bool, radius: f32) -> cosmic::theme::Button {
     let style = move |hovered: bool| {
@@ -3480,7 +3518,30 @@ impl OpenCodeCosmic {
     }
 
     /// The modal frame both palettes share.
-    fn modal_frame<'a>(&'a self, title: &str, body: Element<'a, Message>) -> Element<'a, Message> {
+    /// GTK's `.modal-backdrop`: every app modal sits over a full-window scrim
+    /// (rgba(0,0,0,0.4) light / 0.65 dark).
+    fn modal_backdrop<'a>(&'a self, content: Element<'a, Message>) -> Element<'a, Message> {
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center)
+            .style(|_theme: &cosmic::Theme| container::Style {
+                background: Some(palette::current().modal_backdrop.into()),
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// GTK's `open_app_modal(kind, width, height)` sizes each modal explicitly:
+    /// sessions 520, new session and rename 350 x 310.
+    fn modal_frame<'a>(
+        &'a self,
+        width: f32,
+        height: f32,
+        title: &str,
+        body: Element<'a, Message>,
+    ) -> Element<'a, Message> {
         let radius = self.space(0.89);
         let frame = container(
             column::with_children(vec![
@@ -3502,9 +3563,10 @@ impl OpenCodeCosmic {
                 body,
             ])
             .spacing(self.space(0.89))
-            // GTK's sessions palette was `min-width: 39em`.
-            .width(Length::Fixed(39.0 * crate::metrics::BASE_FONT_PX))
-            .height(Length::Fixed(24.0 * crate::metrics::BASE_FONT_PX)),
+            // GTK's `set_size_request` is the card's outer size and iced adds
+            // padding outside a fixed width, so the padding comes off here.
+            .width(Length::Fixed(width - 2.0 * self.space(1.04)))
+            .height(Length::Fixed(height - 2.0 * self.space(1.04))),
         )
         .padding(self.space(1.04) as u16)
         .style(move |_theme: &cosmic::Theme| container::Style {
@@ -3517,12 +3579,17 @@ impl OpenCodeCosmic {
             ..Default::default()
         });
 
-        frame.into()
+        self.modal_backdrop(frame.into())
     }
 
     /// GTK's session picker: a search field over the session list.
     fn sessions_palette(&self) -> Element<'_, Message> {
-        self.modal_frame("Sessions", self.sessions_palette_body())
+        self.modal_frame(
+            self.space(39.0),
+            self.space(24.0),
+            "Sessions",
+            self.sessions_palette_body(),
+        )
     }
 
     fn sessions_palette_body(&self) -> Element<'_, Message> {
@@ -3531,10 +3598,13 @@ impl OpenCodeCosmic {
         body_items.push(
             row::with_children(vec![
                 inline_icon(icons::search(), self.zoom).into(),
-                text_input("Search sessions...", &self.search_query)
-                    .on_input(Message::SearchInput)
-                    .width(Length::Fill)
-                    .into(),
+                field_input(
+                    "Search sessions...",
+                    &self.search_query,
+                    Message::SearchInput,
+                )
+                .width(Length::Fill)
+                .into(),
             ])
             .spacing(self.space(0.44))
             .align_y(Alignment::Center)
@@ -3641,10 +3711,13 @@ impl OpenCodeCosmic {
 
         let search_row: Element<'_, Message> = row::with_children(vec![
             inline_icon(icons::search(), self.zoom).into(),
-            text_input("Search locations...", &self.search_query)
-                .on_input(Message::SearchInput)
-                .width(Length::Fill)
-                .into(),
+            field_input(
+                "Search locations...",
+                &self.search_query,
+                Message::SearchInput,
+            )
+            .width(Length::Fill)
+            .into(),
         ])
         .spacing(self.space(0.44))
         .align_y(Alignment::Center)
@@ -3662,7 +3735,12 @@ impl OpenCodeCosmic {
             .spacing(self.space(0.59))
             .height(Length::Fill);
 
-        self.modal_frame("New session", body.into())
+        self.modal_frame(
+            self.space(26.25),
+            self.space(23.25),
+            "New session",
+            body.into(),
+        )
     }
 
     /// GTK's rename dialog: the title entry plus the session ID with a copy
@@ -3704,9 +3782,7 @@ impl OpenCodeCosmic {
                 .size(self.em(0.82))
                 .class(cosmic::theme::Text::Color(palette::current().muted_text))
                 .into(),
-            text_input("Session title", &self.rename_input)
-                .on_input(Message::RenameInput)
-                .into(),
+            field_input("Session title", &self.rename_input, Message::RenameInput).into(),
             text("Session ID")
                 .size(self.em(0.82))
                 .class(cosmic::theme::Text::Color(palette::current().muted_text))
@@ -3727,7 +3803,12 @@ impl OpenCodeCosmic {
             .spacing(self.space(0.44))
             .height(Length::Fill);
 
-        self.modal_frame("Rename session", body.into())
+        self.modal_frame(
+            self.space(26.25),
+            self.space(23.25),
+            "Rename session",
+            body.into(),
+        )
     }
 
     fn settings_palette(&self) -> Element<'_, Message> {
@@ -3827,7 +3908,7 @@ impl OpenCodeCosmic {
         let rail_radius = self.space(0.81);
         let rail = container(row::with_children(vec![rail_body.into(), rail_rule.into()]))
             // GTK's `.settings-rail`: 12.5em, right border, left rounded corners.
-            .width(Length::Fixed(self.space(12.5)))
+            .width(Length::Fixed(self.space(21.0)))
             .height(Length::Fill)
             .style(move |_theme: &cosmic::Theme| container::Style {
                 background: Some(palette::current().settings_rail_bg.into()),
@@ -3862,16 +3943,7 @@ impl OpenCodeCosmic {
             });
         // The dialog fills its overlay; the frame remains centred above GTK's
         // `.modal-backdrop` tint instead of tinting the modal itself.
-        container(frame)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .align_x(Alignment::Center)
-            .align_y(Alignment::Center)
-            .style(|_theme: &cosmic::Theme| container::Style {
-                background: Some(palette::current().modal_backdrop.into()),
-                ..Default::default()
-            })
-            .into()
+        self.modal_backdrop(frame.into())
     }
 
     fn settings_connection_page(&self) -> Element<'_, Message> {
@@ -3926,18 +3998,15 @@ impl OpenCodeCosmic {
         };
         let body = column::with_children(vec![
             text("OpenCode server URL").into(),
-            text_input("https://opencode.example.com", &self.server_url_input)
-                .on_input(Message::SettingsUrlInput)
+            field_input("https://opencode.example.com", &self.server_url_input, Message::SettingsUrlInput)
                 .width(Length::Fill)
                 .into(),
             text("Username").into(),
-            text_input("", &self.username_input)
-                .on_input(Message::SettingsUsernameInput)
+            field_input("", &self.username_input, Message::SettingsUsernameInput)
                 .width(Length::Fill)
                 .into(),
             text("Password").into(),
-            text_input(password_placeholder, &self.password_input)
-                .on_input(Message::SettingsPasswordInput)
+            field_input(password_placeholder, &self.password_input, Message::SettingsPasswordInput)
                 .password()
                 .width(Length::Fill)
                 .into(),
@@ -3953,13 +4022,11 @@ impl OpenCodeCosmic {
             hairline(palette::current().settings_topbar_border),
             text("Cloudflare Access service token").into(),
             text("Client ID").into(),
-            text_input("Optional", &self.cloudflare_client_id_input)
-                .on_input(Message::SettingsCloudflareClientIdInput)
+            field_input("Optional", &self.cloudflare_client_id_input, Message::SettingsCloudflareClientIdInput)
                 .width(Length::Fill)
                 .into(),
             text("Client secret").into(),
-            text_input(cloudflare_placeholder, &self.cloudflare_client_secret_input)
-                .on_input(Message::SettingsCloudflareClientSecretInput)
+            field_input(cloudflare_placeholder, &self.cloudflare_client_secret_input, Message::SettingsCloudflareClientSecretInput)
                 .password()
                 .width(Length::Fill)
                 .into(),
