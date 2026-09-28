@@ -181,6 +181,8 @@ pub struct Palette {
     pub model_subtext: Color,
     /// `@oc_border_queue_tray_row` — hairlines between tray rows.
     pub tray_row_divider: Color,
+    /// `@oc_fg_queue_tray_group`
+    pub tray_group_fg: Color,
     /// `@oc_fg_queue_tray_title`
     pub tray_title_text: Color,
     /// `@oc_fg_queue_tray_group`
@@ -388,6 +390,7 @@ pub const LIGHT: Palette = Palette {
     model_active_title: Color::from_rgb8(0x25, 0x63, 0xeb),
     model_subtext: Color::from_rgb8(0x6f, 0x74, 0x71),
     tray_row_divider: Color::from_rgb8(0xde, 0xda, 0xd2),
+    tray_group_fg: Color::from_rgb8(0x85, 0x7f, 0x75),
     tray_title_text: Color::from_rgb8(0x34, 0x31, 0x2d),
     tray_group_text: Color::from_rgb8(0x85, 0x7f, 0x75),
     tray_text: Color::from_rgb8(0x26, 0x24, 0x21),
@@ -532,6 +535,7 @@ pub const DARK: Palette = Palette {
     model_active_title: Color::from_rgb8(0x62, 0xbc, 0xeb),
     model_subtext: Color::from_rgb8(0x89, 0x90, 0x97),
     tray_row_divider: Color::from_rgb8(0x26, 0x2b, 0x2f),
+    tray_group_fg: Color::from_rgb8(0x8e, 0x93, 0x8f),
     tray_title_text: Color::from_rgb8(0xe2, 0xdf, 0xd8),
     tray_group_text: Color::from_rgb8(0x8e, 0x93, 0x8f),
     tray_text: Color::from_rgb8(0xd6, 0xd3, 0xcc),

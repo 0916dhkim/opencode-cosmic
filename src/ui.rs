@@ -2060,7 +2060,6 @@ impl Application for OpenCodeCosmic {
                         .into(),
                     );
                 }
-                header_items.push(tray_text_button("Clear all", self.zoom, Message::TrayClear));
 
                 let mut tray_rows = Vec::new();
                 tray_rows.push(
@@ -2073,18 +2072,52 @@ impl Application for OpenCodeCosmic {
                     .into(),
                 );
 
-                for item in &tray_items {
+                // GTK groups the tray's rows by when they run
+                // (`tray::tray_groups`) and heads each group with its label,
+                // styled by `.queue-tray-group`.
+                let grouped_rows = self.tray_rows();
+                let mut ordered: Vec<(Option<String>, crate::tray::TrayRow)> = Vec::new();
+                for group in crate::tray::tray_groups(&grouped_rows, is_busy) {
+                    for (index, row) in group.rows.iter().enumerate() {
+                        ordered.push((
+                            if index == 0 {
+                                Some(group.label.clone())
+                            } else {
+                                None
+                            },
+                            row.clone(),
+                        ));
+                    }
+                }
+                for (group_label, item) in ordered {
+                    if let Some(label) = group_label {
+                        tray_rows.push(hairline(palette::current().tray_row_divider));
+                        tray_rows.push(
+                            container(
+                                text(label)
+                                    .size(self.em(0.72))
+                                    .font(cosmic::iced::Font {
+                                        weight: cosmic::iced::font::Weight::Bold,
+                                        ..cosmic::iced::Font::DEFAULT
+                                    })
+                                    .class(cosmic::theme::Text::Color(
+                                        palette::current().tray_group_fg,
+                                    )),
+                            )
+                            // GTK's `.queue-tray-group` padding, and 0.09em
+                            // letter-spacing.
+                            .padding([self.space(0.45), 0.0, self.space(0.05), self.space(0.75)])
+                            .width(Length::Fill)
+                            .into(),
+                        );
+                    }
                     let delivery_label = match item.delivery {
                         protocol::Delivery::Steer => "STEER",
                         protocol::Delivery::Queue => "QUEUE",
                         _ => "STEER",
                     };
 
-                    let preview_text = if item.text.len() > 60 {
-                        format!("{}...", &item.text[..60])
-                    } else {
-                        item.text.clone()
-                    };
+                    let preview_text = item.summary.clone();
 
                     // GTK queue badges: tinted pills, amber for steers and
                     // grey for queued turns.
