@@ -1807,49 +1807,63 @@ impl Application for OpenCodeCosmic {
                     .height(Length::Fixed(0.0))
                     .into(),
                 Some((_id, prompt_text, created)) => {
+                    // GTK's `.sticky-message` carries its padding inside the
+                    // box, closes it with `border-bottom` alone and casts its
+                    // shadow from the box's own edge - so the hairline is drawn
+                    // after the padded, shadowed box rather than as a border on
+                    // it, which would leave the shadow tinting the hairline.
                     let sticky = container(
                         column::with_children(vec![
-                            row::with_children(vec![
-                                text("YOU")
-                                    .size(self.em(0.76))
-                                    .font(cosmic::iced::Font {
-                                        weight: cosmic::iced::font::Weight::Bold,
-                                        ..cosmic::iced::Font::DEFAULT
-                                    })
-                                    .class(cosmic::theme::Text::Color(
-                                        palette::current().user_role_text,
-                                    ))
-                                    .width(Length::Fill)
+                            container(
+                                column::with_children(vec![
+                                    row::with_children(vec![
+                                        text("YOU")
+                                            .size(self.em(0.76))
+                                            .font(cosmic::iced::Font {
+                                                weight: cosmic::iced::font::Weight::Bold,
+                                                ..cosmic::iced::Font::DEFAULT
+                                            })
+                                            .class(cosmic::theme::Text::Color(
+                                                palette::current().user_role_text,
+                                            ))
+                                            .width(Length::Fill)
+                                            .into(),
+                                        text(clock_time(created))
+                                            .size(self.em(0.76))
+                                            .class(cosmic::theme::Text::Color(
+                                                palette::current().time_text,
+                                            ))
+                                            .into(),
+                                    ])
+                                    .align_y(Alignment::Center)
                                     .into(),
-                                text(clock_time(created))
-                                    .size(self.em(0.76))
-                                    .class(cosmic::theme::Text::Color(palette::current().time_text))
-                                    .into(),
+                                    text(blank_lines(&prompt_text))
+                                        .size(self.em(0.96))
+                                        .class(cosmic::theme::Text::Color(
+                                            palette::current().content_text,
+                                        ))
+                                        .width(Length::Fill)
+                                        .into(),
+                                ])
+                                .spacing(self.space(crate::metrics::px(6.0))),
+                            )
+                            .padding([
+                                self.space(1.33) as u16,
+                                self.space(2.07) as u16,
+                                self.space(1.48) as u16,
+                                self.space(2.07) as u16,
                             ])
-                            .align_y(Alignment::Center)
+                            .width(Length::Fill)
                             .into(),
-                            text(blank_lines(&prompt_text))
-                                .size(self.em(0.96))
-                                .class(cosmic::theme::Text::Color(palette::current().content_text))
-                                .width(Length::Fill)
-                                .into(),
+                            // Inside the box, so the shadow starts below the
+                            // hairline instead of tinting it.
+                            hairline(palette::current().sticky_border),
                         ])
-                        .spacing(self.space(crate::metrics::px(6.0))),
+                        .width(Length::Fill),
                     )
-                    .padding([
-                        self.space(1.33) as u16,
-                        self.space(2.07) as u16,
-                        self.space(1.48) as u16,
-                        self.space(2.07) as u16,
-                    ])
                     .width(Length::Fill)
                     .style(move |_theme: &cosmic::Theme| container::Style {
                         background: Some(palette::current().window_bg.into()),
-                        border: Border {
-                            color: palette::current().sticky_border,
-                            width: 1.0,
-                            radius: 0.0.into(),
-                        },
                         shadow: cosmic::iced::Shadow {
                             color: palette::current().sticky_shadow,
                             offset: cosmic::iced::Vector::new(0.0, 4.0),
