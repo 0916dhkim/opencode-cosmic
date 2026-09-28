@@ -1776,11 +1776,11 @@ impl Application for OpenCodeCosmic {
                     tray_text_button(
                         "Deny",
                         self.zoom,
-                        Message::ReplyPermission {
+                        Some(Message::ReplyPermission {
                             request_id: request.id.clone(),
                             session_id: request.session_id.clone(),
                             decision: protocol::PermissionDecision::Reject,
-                        },
+                        }),
                     ),
                 ];
                 actions.push(
@@ -1802,11 +1802,11 @@ impl Application for OpenCodeCosmic {
                     actions.push(tray_text_button(
                         "Always allow",
                         self.zoom,
-                        Message::ReplyPermission {
+                        Some(Message::ReplyPermission {
                             request_id: request.id.clone(),
                             session_id: request.session_id.clone(),
                             decision: protocol::PermissionDecision::Always,
-                        },
+                        }),
                     ));
                 }
                 card_items.push(
@@ -2202,13 +2202,15 @@ impl Application for OpenCodeCosmic {
                         row_items.push(tray_text_button(
                             crate::tray::switch_label(item.delivery),
                             self.zoom,
-                            Message::TrayAction(item.id.clone(), RowAction::Switch),
+                            crate::tray::row_request(&item, RowAction::Switch, paused)
+                                .map(|_| Message::TrayAction(item.id.clone(), RowAction::Switch)),
                         ));
                     }
                     row_items.push(tray_icon_button(
                         icons::close(),
                         self.zoom,
-                        Message::TrayAction(item.id.clone(), RowAction::Cancel),
+                        crate::tray::row_request(&item, RowAction::Cancel, paused)
+                            .map(|_| Message::TrayAction(item.id.clone(), RowAction::Cancel)),
                     ));
                     let item_row = row::with_children(row_items)
                         .spacing(self.space(0.59))
@@ -3558,22 +3560,38 @@ fn tray_button_class(radius: f32) -> cosmic::theme::Button {
     }
 }
 
-fn tray_text_button(label: &'static str, zoom: f32, message: Message) -> Element<'static, Message> {
+/// A disabled control's content: GTK dims it toward the surface it sits on
+/// (`set_sensitive(false)` renders the icon at roughly a quarter strength).
+fn dimmed_content(fg: cosmic::iced::Color, bg: cosmic::iced::Color) -> cosmic::iced::Color {
+    let mix = |a: f32, b: f32| a * 0.26 + b * 0.74;
+    cosmic::iced::Color::from_rgb(mix(fg.r, bg.r), mix(fg.g, bg.g), mix(fg.b, bg.b))
+}
+
+fn tray_text_button(
+    label: &'static str,
+    zoom: f32,
+    action: Option<Message>,
+) -> Element<'static, Message> {
     let radius = crate::metrics::space(0.37, zoom);
+    let palette = palette::current();
+    // GTK: `button.set_sensitive(tray::row_request(row, action, paused).is_some())`.
+    let ink = if action.is_some() {
+        palette.tray_button_text
+    } else {
+        dimmed_content(palette.tray_button_text, palette.tray_button_bg)
+    };
     button::custom(
         text(label)
             .size(crate::metrics::em(0.96, zoom))
             .line_height(crate::metrics::line_height(1.0))
-            .class(cosmic::theme::Text::Color(
-                palette::current().tray_button_text,
-            )),
+            .class(cosmic::theme::Text::Color(ink)),
     )
     // GTK's `button.queue-tray-cancel`: `min-height: 1.85em`,
     // `padding: 0 0.7em`.
     .height(Length::Fixed(crate::metrics::space(1.85, zoom)))
     .padding([0, crate::metrics::space(0.7, zoom) as u16])
     .class(tray_button_class(radius))
-    .on_press(message)
+    .on_press_maybe(action)
     .into()
 }
 
@@ -3581,17 +3599,21 @@ fn tray_text_button(label: &'static str, zoom: f32, message: Message) -> Element
 fn tray_icon_button(
     handle: cosmic::widget::icon::Handle,
     zoom: f32,
-    message: Message,
+    action: Option<Message>,
 ) -> Element<'static, Message> {
     let radius = crate::metrics::space(0.37, zoom);
     let size = crate::metrics::em(0.92, zoom) as u16;
+    let palette = palette::current();
+    let ink = if action.is_some() {
+        palette.tray_button_text
+    } else {
+        dimmed_content(palette.tray_button_text, palette.tray_button_bg)
+    };
     button::custom(
         cosmic::widget::icon::icon(handle)
             .size(size)
-            .class(cosmic::theme::Svg::custom(|_theme: &cosmic::Theme| {
-                cosmic::iced::widget::svg::Style {
-                    color: Some(palette::current().tray_button_text),
-                }
+            .class(cosmic::theme::Svg::custom(move |_theme: &cosmic::Theme| {
+                cosmic::iced::widget::svg::Style { color: Some(ink) }
             })),
     )
     // GTK's square twin: `min-width: 1.85em; padding: 0` with a 1em glyph.
@@ -3599,7 +3621,7 @@ fn tray_icon_button(
     .height(Length::Fixed(crate::metrics::space(1.85, zoom)))
     .padding(0)
     .class(tray_button_class(radius))
-    .on_press(message)
+    .on_press_maybe(action)
     .into()
 }
 
