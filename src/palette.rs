@@ -47,6 +47,10 @@ pub struct Palette {
     pub prompt_subheading: Color,
     /// `@oc_fg_prompt_metadata`
     pub prompt_metadata: Color,
+    /// `@oc_bg_prompt_detail` — the command/metadata bands in a prompt.
+    pub prompt_detail_bg: Color,
+    /// `@oc_fg_prompt_detail`
+    pub prompt_detail_fg: Color,
     /// `@oc_bg_new_session_palette` — GTK's modal palettes.
     pub modal_bg: Color,
     /// `@oc_border_new_session_palette`
@@ -326,6 +330,8 @@ pub const LIGHT: Palette = Palette {
     form_notice_border: Color::from_rgb8(0xcb, 0xc7, 0xbf),
     prompt_subheading: Color::from_rgb8(0x8b, 0x59, 0x18),
     prompt_metadata: Color::from_rgb8(0x62, 0x67, 0x64),
+    prompt_detail_bg: Color::from_rgb8(0xef, 0xed, 0xe8),
+    prompt_detail_fg: Color::from_rgb8(0x34, 0x31, 0x2d),
     modal_bg: Color::from_rgb8(0xfb, 0xf9, 0xf4),
     modal_border: Color::from_rgb8(0xd0, 0xcc, 0xc4),
     new_session_bg: Color::from_rgb8(0xfb, 0xf9, 0xf4),
@@ -472,6 +478,8 @@ pub const DARK: Palette = Palette {
     form_notice_border: Color::from_rgb8(0x2d, 0x32, 0x36),
     prompt_subheading: Color::from_rgb8(0xd8, 0xa5, 0x5f),
     prompt_metadata: Color::from_rgb8(0x9d, 0xa4, 0xaa),
+    prompt_detail_bg: Color::from_rgb8(0x15, 0x19, 0x1c),
+    prompt_detail_fg: Color::from_rgb8(0xd2, 0xce, 0xc7),
     modal_bg: Color::from_rgb8(0x15, 0x18, 0x1c),
     modal_border: Color::from_rgb8(0x2a, 0x30, 0x38),
     new_session_bg: Color::from_rgb8(0x15, 0x18, 0x1c),

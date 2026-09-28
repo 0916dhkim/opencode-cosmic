@@ -1724,116 +1724,6 @@ impl Application for OpenCodeCosmic {
                 }
             }
 
-            // GTK's permission prompts: "Allow {action}?" with the source and
-            // metadata lines and Deny / Allow once / Allow always.
-            for request in self.visible_permissions() {
-                let action = if request.action.trim().is_empty() {
-                    "this action".to_owned()
-                } else {
-                    request.action.clone()
-                };
-                let mut card_items: Vec<Element<'_, Message>> = vec![
-                    text(format!("Allow {action}?"))
-                        .size(self.em(0.96))
-                        .font(cosmic::iced::Font {
-                            weight: cosmic::iced::font::Weight::Bold,
-                            ..cosmic::iced::Font::DEFAULT
-                        })
-                        .class(cosmic::theme::Text::Color(
-                            palette::current().prompt_subheading,
-                        ))
-                        .into(),
-                ];
-                if let Some(source) = crate::pending::source_text(request) {
-                    card_items.push(
-                        text(source)
-                            .size(self.em(0.9))
-                            .class(cosmic::theme::Text::Color(
-                                palette::current().prompt_metadata,
-                            ))
-                            .into(),
-                    );
-                }
-                if let Some(metadata) = crate::pending::metadata_text(request.metadata.as_ref()) {
-                    // GTK capped the details block at 320px.
-                    card_items.push(
-                        container(
-                            scrollable(text(metadata).size(self.em(0.9)).class(
-                                cosmic::theme::Text::Color(palette::current().prompt_metadata),
-                            ))
-                            .height(Length::Shrink),
-                        )
-                        .max_height(self.space(crate::metrics::px(320.0)))
-                        .into(),
-                    );
-                }
-
-                // GTK: right-aligned Deny / Allow once (`suggested-action`) /
-                // Always allow. No reply is ever the default, so a stray Enter
-                // or Space while typing can never answer a prompt.
-                let mut actions: Vec<Element<'_, Message>> = vec![
-                    fill_spacer(),
-                    tray_text_button(
-                        "Deny",
-                        self.zoom,
-                        Some(Message::ReplyPermission {
-                            request_id: request.id.clone(),
-                            session_id: request.session_id.clone(),
-                            decision: protocol::PermissionDecision::Reject,
-                        }),
-                    ),
-                ];
-                actions.push(
-                    button::custom(
-                        text("Allow once")
-                            .size(self.em(0.96))
-                            .class(cosmic::theme::Text::Color(palette::current().accent_fg)),
-                    )
-                    .padding([self.space(0.3) as u16, self.space(0.85) as u16])
-                    .class(resume_button_class(self.space(0.59)))
-                    .on_press(Message::ReplyPermission {
-                        request_id: request.id.clone(),
-                        session_id: request.session_id.clone(),
-                        decision: protocol::PermissionDecision::Once,
-                    })
-                    .into(),
-                );
-                if request.offers_always() {
-                    actions.push(tray_text_button(
-                        "Always allow",
-                        self.zoom,
-                        Some(Message::ReplyPermission {
-                            request_id: request.id.clone(),
-                            session_id: request.session_id.clone(),
-                            decision: protocol::PermissionDecision::Always,
-                        }),
-                    ));
-                }
-                card_items.push(
-                    row::with_children(actions)
-                        .spacing(self.space(0.59))
-                        .align_y(Alignment::Center)
-                        .into(),
-                );
-
-                let radius = self.space(0.67);
-                message_elements.push(
-                    container(column::with_children(card_items).spacing(self.space(0.44)))
-                        .padding([self.space(0.74) as u16, self.space(0.89) as u16])
-                        .width(Length::Fill)
-                        .style(move |_theme: &cosmic::Theme| container::Style {
-                            background: Some(palette::current().form_notice_bg.into()),
-                            border: Border {
-                                color: palette::current().form_notice_border,
-                                width: 1.0,
-                                radius: radius.into(),
-                            },
-                            ..Default::default()
-                        })
-                        .into(),
-                );
-            }
-
             let message_list = column::with_children(message_elements)
                 .spacing(self.space(crate::metrics::px(0.0)))
                 // GTK's scrollbar occupies a 16px gutter; iced reserves
@@ -2509,7 +2399,12 @@ impl Application for OpenCodeCosmic {
                 self.space(1.19) as u16,
                 self.space(1.35) as u16,
             ]);
-            main_items.push(composer_outer.into());
+            // GTK's `composer_stack`: an open permission prompt replaces the
+            // composer inside the same slot.
+            match self.composer_prompt() {
+                Some(prompt) => main_items.push(prompt),
+                None => main_items.push(composer_outer.into()),
+            }
         } else {
             let empty_view = column::with_children(vec![
                 text("Welcome to OpenCode COSMIC")
@@ -3558,6 +3453,34 @@ fn tray_button_class(radius: f32) -> cosmic::theme::Button {
         pressed: Box::new(move |_focused, _theme| base()),
         disabled: Box::new(move |_theme| base()),
     }
+}
+
+/// GTK's `.prompt-detail`: a monospace band with its own surface, used for a
+/// prompt's command, its metadata and its always-allow patterns.
+fn prompt_band(content: String, zoom: f32) -> Element<'static, Message> {
+    let radius = crate::metrics::space(0.52, zoom);
+    container(
+        text(content)
+            .size(crate::metrics::em(0.9, zoom))
+            .font(cosmic::iced::Font::MONOSPACE)
+            .class(cosmic::theme::Text::Color(
+                palette::current().prompt_detail_fg,
+            )),
+    )
+    .padding([
+        crate::metrics::space(0.74, zoom) as u16,
+        crate::metrics::space(0.89, zoom) as u16,
+    ])
+    .width(Length::Fill)
+    .style(move |_theme: &cosmic::Theme| container::Style {
+        background: Some(palette::current().prompt_detail_bg.into()),
+        border: Border {
+            radius: radius.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+    .into()
 }
 
 /// A disabled control's content: GTK dims it toward the surface it sits on
@@ -5709,6 +5632,181 @@ impl OpenCodeCosmic {
                     .is_none_or(|scope| scope == active)
             })
             .collect()
+    }
+
+    /// GTK's `permission_context`: who asked, in which directory, and how.
+    fn permission_context(&self, request: &protocol::PermissionRequest) -> String {
+        let session = self.sessions.get(&request.session_id);
+        let requester = match session {
+            Some(session) => session.title.clone(),
+            None => match self
+                .session_parents()
+                .get(&request.session_id)
+                .and_then(|parent| self.sessions.get(parent))
+            {
+                Some(parent) => format!("a subagent of {}", parent.title),
+                None => format!("session {}", request.session_id),
+            },
+        };
+        let directory = session.map(|s| s.directory.clone()).unwrap_or_default();
+        let mut context = format!("Requested by {requester}\n{directory}");
+        if let Some(source) = crate::pending::source_text(request) {
+            context.push_str(&format!("\n{source}"));
+        }
+        context
+    }
+
+    /// GTK's blocking prompt, which replaces the composer: `composer_stack`
+    /// holds `composer_frame` and `prompt_frame`, and the prompt frame is the
+    /// visible one while a permission for the active session is open. So this
+    /// renders in the composer's slot, not in the transcript.
+    fn composer_prompt(&self) -> Option<Element<'_, Message>> {
+        let requests = self.visible_permissions();
+        if requests.is_empty() {
+            return None;
+        }
+        let palette_now = palette::current();
+        let radius = self.space(0.89);
+        let mut cards: Vec<Element<'_, Message>> = Vec::new();
+        for request in requests {
+            let action = if request.action.trim().is_empty() {
+                "tool action".to_owned()
+            } else {
+                request.action.clone()
+            };
+            let mut items: Vec<Element<'_, Message>> = vec![
+                // GTK's `.prompt-heading`: 1.2em, 700, no colour of its own,
+                // so it inherits the window foreground.
+                text(format!("Allow {action}?"))
+                    .size(self.em(1.2))
+                    .font(cosmic::iced::Font {
+                        weight: cosmic::iced::font::Weight::Bold,
+                        ..cosmic::iced::Font::DEFAULT
+                    })
+                    .class(cosmic::theme::Text::Color(palette_now.window_fg))
+                    .into(),
+                // GTK's `.session-picker-path`: 0.84em in the picker path tone.
+                text(self.permission_context(request))
+                    .size(self.em(0.84))
+                    .class(cosmic::theme::Text::Color(palette_now.picker_path_fg))
+                    .into(),
+            ];
+            let mut details: Vec<Element<'_, Message>> = Vec::new();
+            if let Some(message) = request
+                .message
+                .as_deref()
+                .map(str::trim)
+                .filter(|message| !message.is_empty())
+            {
+                details.push(text(message.to_owned()).size(self.em(0.9)).into());
+            }
+            // GTK's `.prompt-detail`: a monospace band carrying the command,
+            // `padding: 0.74em 0.89em`, `border-radius: 0.52em` and its own
+            // surface (`@oc_bg_prompt_detail`).
+            if !request.resources.is_empty() {
+                details.push(prompt_band(request.resources.join("\n"), self.zoom));
+            }
+            if let Some(metadata) = crate::pending::metadata_text(request.metadata.as_ref()) {
+                details.push(prompt_band(metadata, self.zoom));
+            }
+            if let Some(patterns) = crate::pending::always_patterns(request) {
+                details.push(
+                    text("Always allow would remember:")
+                        .size(self.em(0.9))
+                        .font(cosmic::iced::Font::MONOSPACE)
+                        .class(cosmic::theme::Text::Color(palette_now.prompt_subheading))
+                        .into(),
+                );
+                details.push(prompt_band(patterns, self.zoom));
+            }
+            if !details.is_empty() {
+                // GTK wraps the details in a `ScrolledWindow` with
+                // `min_content_height(80)` and `max_content_height(320)`.
+                // Inside the prompt frame - which takes the composer's slot -
+                // that renders at the composer's own height (the 72px input
+                // minimum plus the footer) and clips the rest, so the details
+                // box is bounded the same way here rather than growing with
+                // its content.
+                items.push(
+                    container(
+                        scrollable(column::with_children(details).spacing(self.space(0.44)))
+                            .height(Length::Shrink),
+                    )
+                    .height(Length::Fixed(self.space(crate::metrics::px(114.0))))
+                    .width(Length::Fill)
+                    .into(),
+                );
+            }
+            // GTK: right-aligned Deny / Allow once (`suggested-action`) /
+            // Always allow. No reply is ever the default, so a stray Enter or
+            // Space while typing can never answer a prompt.
+            let mut actions: Vec<Element<'_, Message>> = vec![
+                fill_spacer(),
+                tray_text_button(
+                    "Deny",
+                    self.zoom,
+                    Some(Message::ReplyPermission {
+                        request_id: request.id.clone(),
+                        session_id: request.session_id.clone(),
+                        decision: protocol::PermissionDecision::Reject,
+                    }),
+                ),
+            ];
+            actions.push(
+                button::custom(
+                    text("Allow once")
+                        .size(self.em(0.96))
+                        .class(cosmic::theme::Text::Color(palette_now.accent_fg)),
+                )
+                .padding([self.space(0.3) as u16, self.space(0.85) as u16])
+                .class(resume_button_class(self.space(0.59)))
+                .on_press(Message::ReplyPermission {
+                    request_id: request.id.clone(),
+                    session_id: request.session_id.clone(),
+                    decision: protocol::PermissionDecision::Once,
+                })
+                .into(),
+            );
+            if request.offers_always() {
+                actions.push(tray_text_button(
+                    "Always allow",
+                    self.zoom,
+                    Some(Message::ReplyPermission {
+                        request_id: request.id.clone(),
+                        session_id: request.session_id.clone(),
+                        decision: protocol::PermissionDecision::Always,
+                    }),
+                ));
+            }
+            items.push(
+                row::with_children(actions)
+                    .spacing(self.space(0.59))
+                    .align_y(Alignment::Center)
+                    .into(),
+            );
+            cards.push(
+                container(column::with_children(items).spacing(self.space(0.44)))
+                    // GTK's `.composer-prompt`: 1.04em padding, 0.89em radius,
+                    // the new-session palette's surface.
+                    .padding([self.space(1.04) as u16, self.space(1.04) as u16])
+                    .width(Length::Fill)
+                    .style(move |_theme: &cosmic::Theme| container::Style {
+                        background: Some(palette::current().new_session_bg.into()),
+                        border: Border {
+                            color: palette::current().new_session_border,
+                            width: 1.0,
+                            radius: radius.into(),
+                        },
+                        ..Default::default()
+                    })
+                    .into(),
+            );
+        }
+        Some(
+            column::with_children(cards)
+                .spacing(self.space(0.59))
+                .into(),
+        )
     }
 
     /// The active session's waiting prompts as the tray engine's rows.
