@@ -103,6 +103,10 @@ pub struct Palette {
     pub picker_row_hover_bg: Color,
     /// GTK ListBox `:selected` on the picker's plain rows.
     pub picker_row_selected_bg: Color,
+    /// GTK's level list is a ListBox: its selection is the accent blue,
+    /// measured (53,132,228) light and (21,83,158) dark, with white text.
+    pub level_selected_bg: Color,
+    pub level_selected_fg: Color,
     /// `@oc_border_button_session_picker_row_hover`
     pub picker_row_hover_border: Color,
     /// `@oc_bg_button_session_picker_row_active`
@@ -159,6 +163,22 @@ pub struct Palette {
     pub sidebar_hover_bg: Color,
     /// `@oc_bg_composer_action_hover`
     pub action_hover_bg: Color,
+    /// `@oc_shadow_popover_background_model_picker_popover_contents`
+    pub model_popover_shadow: Color,
+    /// `@oc_bg_session_id_field`
+    pub model_search_bg: Color,
+    /// `@oc_border_session_id_field`
+    pub model_search_border: Color,
+    /// `@oc_fg_button_session_id_copy_hover`
+    pub model_search_text: Color,
+    /// `@oc_border_model_picker_search_focus_within`
+    pub model_search_focus_border: Color,
+    /// `@oc_bg_model_picker_row_hover`
+    pub model_row_hover_bg: Color,
+    /// `@oc_fg_model_picker_row_active_model_picker_item_title`
+    pub model_active_title: Color,
+    /// `@oc_fg_model_picker_item_subtext`
+    pub model_subtext: Color,
     /// `@oc_border_queue_tray_row` — hairlines between tray rows.
     pub tray_row_divider: Color,
     /// `@oc_fg_queue_tray_title`
@@ -329,6 +349,8 @@ pub const LIGHT: Palette = Palette {
     picker_row_shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.04),
     picker_row_hover_bg: Color::from_rgb8(0xe7, 0xe4, 0xde),
     picker_row_selected_bg: Color::from_rgb8(0xed, 0xed, 0xed),
+    level_selected_bg: Color::from_rgb8(0x35, 0x84, 0xe4),
+    level_selected_fg: Color::from_rgb8(0xff, 0xff, 0xff),
     picker_row_hover_border: Color::from_rgb8(0xcb, 0xbe, 0xae),
     picker_row_active_bg: Color::from_rgb8(0xf4, 0xee, 0xe2),
     picker_row_active_border: Color::from_rgb8(0xc4, 0xb6, 0xa4),
@@ -357,6 +379,14 @@ pub const LIGHT: Palette = Palette {
     tab_close_hover_fg: Color::from_rgb8(0xff, 0xff, 0xff),
     sidebar_hover_bg: Color::from_rgb8(0xe5, 0xe2, 0xdc),
     action_hover_bg: Color::from_rgb8(0xee, 0xeb, 0xe4),
+    model_popover_shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.15),
+    model_search_bg: Color::from_rgb8(0xff, 0xff, 0xff),
+    model_search_border: Color::from_rgb8(0xd3, 0xcf, 0xc7),
+    model_search_text: Color::from_rgb8(0x28, 0x26, 0x23),
+    model_search_focus_border: Color::from_rgb8(0x25, 0x63, 0xeb),
+    model_row_hover_bg: Color::from_rgb8(0xea, 0xe6, 0xde),
+    model_active_title: Color::from_rgb8(0x25, 0x63, 0xeb),
+    model_subtext: Color::from_rgb8(0x6f, 0x74, 0x71),
     tray_row_divider: Color::from_rgb8(0xde, 0xda, 0xd2),
     tray_title_text: Color::from_rgb8(0x34, 0x31, 0x2d),
     tray_group_text: Color::from_rgb8(0x85, 0x7f, 0x75),
@@ -463,6 +493,8 @@ pub const DARK: Palette = Palette {
     picker_row_shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.2),
     picker_row_hover_bg: Color::from_rgb8(0x20, 0x24, 0x28),
     picker_row_selected_bg: Color::from_rgba(1.0, 1.0, 1.0, 0.1),
+    level_selected_bg: Color::from_rgb8(0x15, 0x53, 0x9e),
+    level_selected_fg: Color::from_rgb8(0xff, 0xff, 0xff),
     picker_row_hover_border: Color::from_rgb8(0x31, 0x3a, 0x48),
     picker_row_active_bg: Color::from_rgb8(0x22, 0x2b, 0x38),
     picker_row_active_border: Color::from_rgb8(0x3c, 0x4a, 0x5f),
@@ -491,6 +523,14 @@ pub const DARK: Palette = Palette {
     tab_close_hover_fg: Color::from_rgb8(0xff, 0xff, 0xff),
     sidebar_hover_bg: Color::from_rgb8(0x19, 0x1d, 0x20),
     action_hover_bg: Color::from_rgb8(0x22, 0x26, 0x2a),
+    model_popover_shadow: Color::from_rgba(0.0, 0.0, 0.0, 0.45),
+    model_search_bg: Color::from_rgb8(0x10, 0x12, 0x14),
+    model_search_border: Color::from_rgb8(0x28, 0x2c, 0x32),
+    model_search_text: Color::from_rgb8(0xf0, 0xed, 0xe7),
+    model_search_focus_border: Color::from_rgb8(0x62, 0xbc, 0xeb),
+    model_row_hover_bg: Color::from_rgb8(0x22, 0x26, 0x2b),
+    model_active_title: Color::from_rgb8(0x62, 0xbc, 0xeb),
+    model_subtext: Color::from_rgb8(0x89, 0x90, 0x97),
     tray_row_divider: Color::from_rgb8(0x26, 0x2b, 0x2f),
     tray_title_text: Color::from_rgb8(0xe2, 0xdf, 0xd8),
     tray_group_text: Color::from_rgb8(0x8e, 0x93, 0x8f),

@@ -47,6 +47,12 @@ pub enum DrawerPage {
     Settings,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComposerPicker {
+    Model,
+    Level,
+}
+
 pub struct OpenCodeCosmic {
     core: Core,
     args: Args,
@@ -65,6 +71,9 @@ pub struct OpenCodeCosmic {
     /// GTK's composer was a multi-line text view, not a one-line entry.
     composer_editor: cosmic::widget::text_editor::Content,
     search_query: String,
+    model_search: String,
+    level_search: String,
+    composer_picker: Option<ComposerPicker>,
     active_drawer: Option<DrawerPage>,
     sidebar_open: bool,
     connection_status: String,
@@ -212,6 +221,10 @@ pub enum Message {
     SelectSession(String),
     SelectModel(String),
     SelectVariant(String),
+    ToggleComposerPicker(ComposerPicker),
+    CloseComposerPicker,
+    ModelSearchInput(String),
+    LevelSearchInput(String),
     SettingsUrlInput(String),
     SettingsUsernameInput(String),
     SettingsPasswordInput(String),
@@ -320,6 +333,9 @@ impl Application for OpenCodeCosmic {
             composer_text: String::new(),
             composer_editor: cosmic::widget::text_editor::Content::new(),
             search_query: String::new(),
+            model_search: String::new(),
+            level_search: String::new(),
+            composer_picker: None,
             active_drawer: None,
             sidebar_open: true,
             connection_status: "Connecting".to_string(),
@@ -689,6 +705,9 @@ impl Application for OpenCodeCosmic {
                 Task::none()
             }
             Message::ComposerEnter { ctrl } => {
+                if self.composer_picker.is_some() {
+                    return Task::none();
+                }
                 if self.active_drawer == Some(DrawerPage::NewSession) {
                     self.confirm_new_session();
                     return Task::none();
@@ -754,6 +773,7 @@ impl Application for OpenCodeCosmic {
             }
             Message::CloseDrawer => {
                 self.active_drawer = None;
+                self.composer_picker = None;
                 Task::none()
             }
             Message::SearchInput(q) => {
@@ -767,10 +787,41 @@ impl Application for OpenCodeCosmic {
             }
             Message::SelectModel(model_id) => {
                 self.switch_model(&model_id);
-                Task::none()
+                self.composer_picker = None;
+                focus_composer()
             }
             Message::SelectVariant(variant) => {
                 self.switch_variant(&variant);
+                self.composer_picker = None;
+                focus_composer()
+            }
+            Message::ToggleComposerPicker(picker) => {
+                if self.composer_picker == Some(picker) {
+                    self.composer_picker = None;
+                    return Task::none();
+                }
+                self.composer_picker = Some(picker);
+                match picker {
+                    ComposerPicker::Model => {
+                        self.model_search.clear();
+                        focus_widget(model_search_id())
+                    }
+                    ComposerPicker::Level => {
+                        self.level_search.clear();
+                        focus_widget(level_search_id())
+                    }
+                }
+            }
+            Message::CloseComposerPicker => {
+                self.composer_picker = None;
+                Task::none()
+            }
+            Message::ModelSearchInput(query) => {
+                self.model_search = query;
+                Task::none()
+            }
+            Message::LevelSearchInput(query) => {
+                self.level_search = query;
                 Task::none()
             }
             Message::SettingsUrlInput(url) => {
@@ -2174,40 +2225,16 @@ impl Application for OpenCodeCosmic {
             if let Some(catalog) = catalog
                 && !catalog.models.is_empty()
             {
-                let labels: Vec<String> = catalog.models.iter().map(|m| m.label.clone()).collect();
-                let ids: Vec<String> = catalog.models.iter().map(|m| m.model_id.clone()).collect();
-                let selected = model_id
-                    .as_ref()
-                    .and_then(|id| ids.iter().position(|candidate| candidate == id));
                 footer_items.push(
-                    // GTK's `.composer-menu`: 0.59em of left padding, a
-                    // medium-weight title and an arrow 0.3em from it.
-                    // libcosmic's dropdown leaves 16px of its box unused on the
-                    // right and draws no arrow, so the arrow is pulled back
-                    // into that reserve with a negative gap: 10px of arrow,
-                    // 11px back, leaves the 5px GTK's CSS produced.
-                    row::with_children(vec![
-                        cosmic::widget::dropdown::dropdown(labels, selected, move |index| {
-                            Message::SelectModel(ids.get(index).cloned().unwrap_or_default())
-                        })
-                        .width(Length::Shrink)
-                        .padding(cosmic::iced::Padding {
-                            top: 0.0,
-                            right: 0.0,
-                            bottom: 0.0,
-                            left: self.space(0.59),
-                        })
-                        .gap(0.0)
-                        .font(cosmic::iced::Font {
-                            weight: cosmic::iced::font::Weight::Medium,
-                            ..cosmic::iced::Font::DEFAULT
-                        })
-                        .into(),
-                        menu_chevron(self.zoom),
-                    ])
-                    .spacing(-self.space(0.83))
-                    .align_y(Alignment::Center)
-                    .into(),
+                    self.composer_picker_control(
+                        ComposerPicker::Model,
+                        model_id
+                            .as_ref()
+                            .and_then(|id| catalog.models.iter().find(|m| &m.model_id == id))
+                            .map(|m| m.label.as_str())
+                            .unwrap_or("Select model"),
+                        self.model_catalog_menu(catalog, model_id.as_deref()),
+                    ),
                 );
 
                 if let Some(model) = model_id
@@ -2215,48 +2242,18 @@ impl Application for OpenCodeCosmic {
                     .and_then(|id| catalog.models.iter().find(|model| &model.model_id == id))
                     .filter(|model| !model.variants.is_empty())
                 {
-                    let mut labels = vec!["Default".to_string()];
-                    labels.extend(model.variants.iter().cloned());
-                    let mut variants = vec![String::new()];
-                    variants.extend(model.variants.iter().cloned());
                     let selected = self
                         .sessions
                         .get(active_id)
                         .and_then(|session| session.model.as_ref())
                         .and_then(|model| model.variant.as_ref())
-                        .and_then(|variant| model.variants.iter().position(|v| v == variant))
-                        .map(|index| index + 1)
-                        .unwrap_or(0);
-                    footer_items.push(
-                        row::with_children(vec![
-                            cosmic::widget::dropdown::dropdown(
-                                labels,
-                                Some(selected),
-                                move |index| {
-                                    Message::SelectVariant(
-                                        variants.get(index).cloned().unwrap_or_default(),
-                                    )
-                                },
-                            )
-                            .width(Length::Shrink)
-                            .padding(cosmic::iced::Padding {
-                                top: 0.0,
-                                right: 0.0,
-                                bottom: 0.0,
-                                left: self.space(0.59),
-                            })
-                            .gap(0.0)
-                            .font(cosmic::iced::Font {
-                                weight: cosmic::iced::font::Weight::Medium,
-                                ..cosmic::iced::Font::DEFAULT
-                            })
-                            .into(),
-                            menu_chevron(self.zoom),
-                        ])
-                        .spacing(-self.space(0.83))
-                        .align_y(Alignment::Center)
-                        .into(),
-                    );
+                        .and_then(|variant| model.variants.iter().find(|v| *v == variant))
+                        .map(String::as_str);
+                    footer_items.push(self.composer_picker_control(
+                        ComposerPicker::Level,
+                        selected.unwrap_or("Default"),
+                        self.reasoning_level_menu(&model.variants, selected),
+                    ));
                 }
             }
 
@@ -2705,6 +2702,14 @@ fn composer_id() -> cosmic::widget::Id {
     cosmic::widget::Id::new("opencode-composer")
 }
 
+fn model_search_id() -> cosmic::widget::Id {
+    cosmic::widget::Id::new("opencode-model-search")
+}
+
+fn level_search_id() -> cosmic::widget::Id {
+    cosmic::widget::Id::new("opencode-level-search")
+}
+
 /// The GTK client's zoom ladder.
 const ZOOM_STEPS: [f32; 9] = [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5, 1.75];
 
@@ -2897,8 +2902,7 @@ fn clock_time(created: u64) -> String {
     )
 }
 
-/// GTK's `.composer-menu` chevron: COSMIC's dropdown draws no arrow, so the
-/// menu label is followed by a small chevron icon.
+/// GTK's `.composer-menu` chevron follows its label by 0.3em.
 fn menu_chevron(zoom: f32) -> Element<'static, Message> {
     cosmic::widget::icon::icon(icons::chevron_down())
         .size(crate::metrics::em(0.76, zoom) as u16)
@@ -2947,6 +2951,85 @@ fn modal_row_class(selected: bool, radius: f32) -> cosmic::theme::Button {
         hovered: Box::new(move |_focused, _theme| hovered()),
         pressed: Box::new(move |_focused, _theme| base()),
         disabled: Box::new(move |_theme| base()),
+    }
+}
+
+/// GTK's `.composer-menu`: transparent at rest, with the composer-action hover fill.
+fn composer_menu_class(radius: f32) -> cosmic::theme::Button {
+    let base = move || cosmic::widget::button::Style {
+        background: None,
+        border_radius: radius.into(),
+        border_width: 0.0,
+        text_color: Some(palette::current().window_fg),
+        ..Default::default()
+    };
+    let hovered = move || cosmic::widget::button::Style {
+        background: Some(palette::current().action_hover_bg.into()),
+        ..base()
+    };
+    cosmic::theme::Button::Custom {
+        active: Box::new(move |_focused, _theme| base()),
+        hovered: Box::new(move |_focused, _theme| hovered()),
+        pressed: Box::new(move |_focused, _theme| hovered()),
+        disabled: Box::new(move |_theme| base()),
+    }
+}
+
+/// GTK's `.model-picker-row` is a flat button; selection and hover share a fill.
+fn model_row_class(selected: bool, level: bool, radius: f32) -> cosmic::theme::Button {
+    let base = move || cosmic::widget::button::Style {
+        background: if selected && level {
+            Some(palette::current().level_selected_bg.into())
+        } else if selected {
+            Some(palette::current().model_row_hover_bg.into())
+        } else {
+            None
+        },
+        border_radius: radius.into(),
+        border_width: 0.0,
+        ..Default::default()
+    };
+    let hovered = move || cosmic::widget::button::Style {
+        background: Some(palette::current().model_row_hover_bg.into()),
+        ..base()
+    };
+    cosmic::theme::Button::Custom {
+        active: Box::new(move |_focused, _theme| base()),
+        hovered: Box::new(move |_focused, _theme| hovered()),
+        pressed: Box::new(move |_focused, _theme| hovered()),
+        disabled: Box::new(move |_theme| base()),
+    }
+}
+
+/// GTK's `.model-picker-search` uses the session-id entry tokens, not the
+/// generic field's colours, and focuses with the picker-specific blue border.
+fn model_search_class(radius: f32) -> cosmic::theme::TextInput {
+    let appearance = move |focused: bool| {
+        let p = palette::current();
+        cosmic::widget::text_input::Appearance {
+            background: p.model_search_bg.into(),
+            border_radius: radius.into(),
+            border_offset: None,
+            border_width: 1.0,
+            border_color: if focused {
+                p.model_search_focus_border
+            } else {
+                p.model_search_border
+            },
+            label_color: p.model_search_text,
+            placeholder_color: p.model_subtext,
+            selected_text_color: p.model_search_text,
+            icon_color: Some(p.model_subtext),
+            text_color: Some(p.model_search_text),
+            selected_fill: p.model_active_title,
+        }
+    };
+    cosmic::theme::TextInput::Custom {
+        active: Box::new(move |_theme| appearance(false)),
+        error: Box::new(move |_theme| appearance(true)),
+        hovered: Box::new(move |_theme| appearance(false)),
+        focused: Box::new(move |_theme| appearance(true)),
+        disabled: Box::new(move |_theme| appearance(false)),
     }
 }
 
@@ -3655,6 +3738,296 @@ impl OpenCodeCosmic {
 
     fn space(&self, factor: f32) -> f32 {
         crate::metrics::space(factor, self.zoom)
+    }
+
+    /// GTK anchored both pickers above their `.composer-menu` buttons. The
+    /// COSMIC dropdown accepts only strings, so its popover is used directly
+    /// to host the GTK search entry and two-line rows.
+    fn composer_picker_control<'a>(
+        &self,
+        picker: ComposerPicker,
+        label: &str,
+        menu: Element<'a, Message>,
+    ) -> Element<'a, Message> {
+        let title = text(label.to_owned())
+            .size(self.em(0.9))
+            .font(cosmic::iced::Font {
+                weight: cosmic::iced::font::Weight::Medium,
+                ..cosmic::iced::Font::DEFAULT
+            })
+            .class(cosmic::theme::Text::Color(palette::current().window_fg));
+        let button = button::custom(
+            row::with_children(vec![title.into(), menu_chevron(self.zoom)])
+                .spacing(self.space(0.3))
+                .align_y(Alignment::Center),
+        )
+        // GTK's `.composer-menu`: minimum 2.37em high, 0.59em side padding.
+        .height(Length::Fixed(self.space(2.37)))
+        .padding([0.0, self.space(0.59)])
+        .class(composer_menu_class(self.space(0.59)))
+        .on_press(Message::ToggleComposerPicker(picker));
+        let mut popover = cosmic::widget::popover(button)
+            .position(cosmic::widget::popover::Position::Top)
+            .on_close(Message::CloseComposerPicker);
+        if self.composer_picker == Some(picker) {
+            popover = popover.popup(menu);
+        }
+        popover.into()
+    }
+
+    fn model_catalog_menu<'a>(
+        &'a self,
+        catalog: &'a ModelCatalog,
+        selected: Option<&str>,
+    ) -> Element<'a, Message> {
+        let query = self.model_search.trim();
+        let mut candidates: Vec<(i64, &model::ModelOption)> = catalog
+            .models
+            .iter()
+            .filter_map(|model| {
+                if query.is_empty() {
+                    return Some((0, model));
+                }
+                let label_score = fuzzy_score(query, &model.label);
+                let id_score = fuzzy_score(
+                    query,
+                    &format!("{} / {}", model.provider_id, model.model_id),
+                );
+                label_score
+                    .into_iter()
+                    .chain(id_score)
+                    .max()
+                    .map(|score| (score, model))
+            })
+            .collect();
+        if !query.is_empty() {
+            candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.label.cmp(&b.1.label)));
+        }
+        let rows: Vec<Element<'a, Message>> = candidates
+            .into_iter()
+            .map(|(_, model)| {
+                self.model_picker_row(
+                    &model.label,
+                    Some(format!("{}/{}", model.provider_id, model.model_id)),
+                    selected == Some(model.model_id.as_str()),
+                    false,
+                    Message::SelectModel(model.model_id.clone()),
+                )
+            })
+            .collect();
+        self.composer_picker_menu(
+            ComposerPicker::Model,
+            rows,
+            "Search models (fuzzy)...",
+            "No matching models",
+            340.0,
+            280.0,
+            100.0,
+            16.0,
+        )
+    }
+
+    fn reasoning_level_menu<'a>(
+        &'a self,
+        variants: &'a [String],
+        selected: Option<&str>,
+    ) -> Element<'a, Message> {
+        let query = self.level_search.trim();
+        let mut candidates: Vec<(i64, &str)> = std::iter::once("Default")
+            .chain(variants.iter().map(String::as_str))
+            .filter_map(|label| {
+                if query.is_empty() {
+                    Some((0, label))
+                } else {
+                    fuzzy_score(query, label).map(|score| (score, label))
+                }
+            })
+            .collect();
+        if !query.is_empty() {
+            candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+        }
+        let rows = candidates
+            .into_iter()
+            .map(|(_, label)| {
+                let is_selected = selected.unwrap_or("Default") == label;
+                self.model_picker_row(
+                    label,
+                    None,
+                    is_selected,
+                    true,
+                    Message::SelectVariant(if label == "Default" {
+                        String::new()
+                    } else {
+                        label.to_owned()
+                    }),
+                )
+            })
+            .collect();
+        self.composer_picker_menu(
+            ComposerPicker::Level,
+            rows,
+            "Search levels (fuzzy)...",
+            "No matching levels",
+            240.0,
+            240.0,
+            80.0,
+            14.0,
+        )
+    }
+
+    fn model_picker_row<'a>(
+        &self,
+        label: &str,
+        subtext: Option<String>,
+        selected: bool,
+        level: bool,
+        selection: Message,
+    ) -> Element<'a, Message> {
+        let mut labels: Vec<Element<'a, Message>> = vec![
+            text(label.to_owned())
+                .size(self.em(0.92))
+                .font(cosmic::iced::Font {
+                    weight: cosmic::iced::font::Weight::Medium,
+                    ..cosmic::iced::Font::DEFAULT
+                })
+                .class(cosmic::theme::Text::Color(if selected && level {
+                    palette::current().level_selected_fg
+                } else if selected {
+                    palette::current().model_active_title
+                } else {
+                    palette::current().window_fg
+                }))
+                .into(),
+        ];
+        if let Some(subtext) = subtext {
+            labels.push(
+                text(subtext)
+                    .size(self.em(0.76))
+                    .class(cosmic::theme::Text::Color(palette::current().model_subtext))
+                    .into(),
+            );
+        }
+        let mut content: Vec<Element<'a, Message>> = vec![
+            column::with_children(labels)
+                .spacing(self.pad_px(2.0))
+                .width(Length::Fill)
+                .into(),
+        ];
+        if selected {
+            content.push(
+                text("✓")
+                    .size(self.em(0.9))
+                    .font(cosmic::iced::Font {
+                        weight: cosmic::iced::font::Weight::Bold,
+                        ..cosmic::iced::Font::DEFAULT
+                    })
+                    .class(cosmic::theme::Text::Color(if level {
+                        palette::current().level_selected_fg
+                    } else {
+                        palette::current().model_active_title
+                    }))
+                    .into(),
+            );
+        }
+        // GTK's `.model-picker-row`: 0.15em/0.3em button padding; the
+        // row's child has an 8px gap and 10px/6px margins.
+        button::custom(
+            row::with_children(content)
+                .spacing(self.pad_px(8.0))
+                .align_y(Alignment::Center)
+                .width(Length::Fill)
+                .padding([self.pad_px(6.0), self.pad_px(10.0)]),
+        )
+        .padding([self.space(0.15), self.space(0.3)])
+        .width(Length::Fill)
+        .class(model_row_class(selected, level, self.space(0.44)))
+        .on_press(selection)
+        .into()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn composer_picker_menu<'a>(
+        &'a self,
+        picker: ComposerPicker,
+        mut rows: Vec<Element<'a, Message>>,
+        placeholder: &'static str,
+        empty: &'static str,
+        width: f32,
+        max_height: f32,
+        min_height: f32,
+        empty_margin: f32,
+    ) -> Element<'a, Message> {
+        let count = rows.len();
+        if rows.is_empty() {
+            rows.push(
+                container(
+                    text(empty)
+                        .size(self.em(0.88))
+                        .class(cosmic::theme::Text::Color(palette::current().model_subtext)),
+                )
+                .padding([self.pad_px(empty_margin), 0])
+                .width(Length::Fill)
+                .align_x(Alignment::Center)
+                .into(),
+            );
+        }
+        let (query, id, on_input): (&str, _, fn(String) -> Message) = match picker {
+            ComposerPicker::Model => (
+                &self.model_search,
+                model_search_id(),
+                Message::ModelSearchInput,
+            ),
+            ComposerPicker::Level => (
+                &self.level_search,
+                level_search_id(),
+                Message::LevelSearchInput,
+            ),
+        };
+        let search = field_input(placeholder, query, on_input)
+            .id(id)
+            .leading_icon(inline_icon(icons::search(), self.zoom).into())
+            .style(model_search_class(self.space(0.44)))
+            .width(Length::Fill);
+        let scroll_height = self.space(crate::metrics::px(
+            (count as f32
+                * if picker == ComposerPicker::Model {
+                    50.0
+                } else {
+                    34.0
+                })
+            .clamp(min_height, max_height),
+        ));
+        let list = scrollable(column::with_children(rows).width(Length::Fill))
+            .direction(scrollbar_direction())
+            .height(Length::Fixed(scroll_height))
+            .width(Length::Fill);
+        let body = column::with_children(vec![search.into(), list.into()])
+            .spacing(self.pad_px(6.0))
+            .width(Length::Fixed(self.space(crate::metrics::px(width))));
+        let radius = self.space(0.74);
+        let shadow_offset = self.space(crate::metrics::px(8.0));
+        let shadow_blur = self.space(crate::metrics::px(24.0));
+        let frame =
+            container(body)
+                .padding(self.space(0.44))
+                .style(move |_theme: &cosmic::Theme| container::Style {
+                    background: Some(palette::current().code_block_bg.into()),
+                    border: Border {
+                        radius: radius.into(),
+                        ..Default::default()
+                    },
+                    shadow: cosmic::iced::Shadow {
+                        color: palette::current().model_popover_shadow,
+                        offset: cosmic::iced::Vector::new(0.0, shadow_offset),
+                        blur_radius: shadow_blur,
+                    },
+                    ..Default::default()
+                });
+        // GTK's top-positioned popover has a -6px anchor offset. The outer
+        // transparent bottom margin puts the painted frame that far above it.
+        container(frame)
+            .padding([0.0, 0.0, self.space(crate::metrics::px(6.0)), 0.0])
+            .into()
     }
 
     /// Opens GTK's file dialog (paperclip) on its own thread; `Tick` collects
