@@ -1460,26 +1460,22 @@ impl Application for OpenCodeCosmic {
                                 );
                             }
                             _ if is_user => {
-                                // GTK rendered user bodies as plain text; each
-                                // blank-line-separated part becomes its own
-                                // block (iced's text widget renders a newline as
-                                // a line break in the same paragraph, which GTK
-                                // showed as a paragraph gap).
-                                for block in row.body.split("\n\n") {
-                                    if block.trim().is_empty() {
-                                        continue;
-                                    }
-                                    body_items.push(
-                                        text(block.to_string())
-                                            .size(self.em(0.96))
-                                            .line_height(line_height(1.45))
-                                            .class(cosmic::theme::Text::Color(dim(
-                                                palette::current().content_text,
-                                            )))
-                                            .width(Length::Fill)
-                                            .into(),
-                                    );
-                                }
+                                // GTK rendered a user body as one plain-text
+                                // label, so the blank line in
+                                // "…as 22px:\n\nAttached: …" is a blank line on
+                                // screen. Splitting the body into blocks gave a
+                                // 10px gap instead, which left every user row
+                                // shorter than GTK's.
+                                body_items.push(
+                                    text(blank_lines(&row.body))
+                                        .size(self.em(0.96))
+                                        .line_height(line_height(1.45))
+                                        .class(cosmic::theme::Text::Color(dim(
+                                            palette::current().content_text
+                                        )))
+                                        .width(Length::Fill)
+                                        .into(),
+                                );
                             }
                             _ => {
                                 body_items.push(markdown::render_markdown(
@@ -1724,7 +1720,7 @@ impl Application for OpenCodeCosmic {
                             ])
                             .align_y(Alignment::Center)
                             .into(),
-                            text(prompt_text)
+                            text(blank_lines(&prompt_text))
                                 .size(self.em(0.96))
                                 .class(cosmic::theme::Text::Color(palette::current().content_text))
                                 .width(Length::Fill)
@@ -2078,15 +2074,32 @@ impl Application for OpenCodeCosmic {
                     .as_ref()
                     .and_then(|id| ids.iter().position(|candidate| candidate == id));
                 footer_items.push(
+                    // GTK's `.composer-menu`: 0.59em of left padding, a
+                    // medium-weight title and an arrow 0.3em from it.
+                    // libcosmic's dropdown leaves 16px of its box unused on the
+                    // right and draws no arrow, so the arrow is pulled back
+                    // into that reserve with a negative gap: 10px of arrow,
+                    // 11px back, leaves the 5px GTK's CSS produced.
                     row::with_children(vec![
                         cosmic::widget::dropdown::dropdown(labels, selected, move |index| {
                             Message::SelectModel(ids.get(index).cloned().unwrap_or_default())
                         })
                         .width(Length::Shrink)
+                        .padding(cosmic::iced::Padding {
+                            top: 0.0,
+                            right: 0.0,
+                            bottom: 0.0,
+                            left: self.space(0.59),
+                        })
+                        .gap(0.0)
+                        .font(cosmic::iced::Font {
+                            weight: cosmic::iced::font::Weight::Medium,
+                            ..cosmic::iced::Font::DEFAULT
+                        })
                         .into(),
                         menu_chevron(self.zoom),
                     ])
-                    .spacing(self.space(0.3))
+                    .spacing(-self.space(0.83))
                     .align_y(Alignment::Center)
                     .into(),
                 );
@@ -2120,10 +2133,21 @@ impl Application for OpenCodeCosmic {
                                 },
                             )
                             .width(Length::Shrink)
+                            .padding(cosmic::iced::Padding {
+                                top: 0.0,
+                                right: 0.0,
+                                bottom: 0.0,
+                                left: self.space(0.59),
+                            })
+                            .gap(0.0)
+                            .font(cosmic::iced::Font {
+                                weight: cosmic::iced::font::Weight::Medium,
+                                ..cosmic::iced::Font::DEFAULT
+                            })
                             .into(),
                             menu_chevron(self.zoom),
                         ])
-                        .spacing(self.space(0.3))
+                        .spacing(-self.space(0.83))
                         .align_y(Alignment::Center)
                         .into(),
                     );
@@ -2716,6 +2740,13 @@ fn hairline(color: cosmic::iced::Color) -> Element<'static, Message> {
             ..Default::default()
         })
         .into()
+}
+
+/// GTK drew plain message bodies as one `gtk::Label`, where an empty line in
+/// the text is an empty line on screen. iced gives an empty line no height, so
+/// each blank line carries a space to hold it open.
+fn blank_lines(body: &str) -> String {
+    body.replace("\n\n", "\n \n")
 }
 
 /// `HH:MM` in local time from a protocol timestamp (milliseconds, or seconds

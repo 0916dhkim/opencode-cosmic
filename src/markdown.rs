@@ -229,8 +229,9 @@ where
                     .line_height(code_line_height());
 
                 let code_container = container(code_text)
-                    // GTK's scrolled window around the code label: 10px above, 12px below.
-                    .padding([10.0, 12.0])
+                    // GTK's scrolled window around the code label: 10px above,
+                    // 12px below and beside.
+                    .padding([10.0, 12.0, 12.0, 12.0])
                     .width(Length::Fill)
                     .style(|_theme| container::Style {
                         text_color: Some(palette::current().code_content_text),
@@ -255,7 +256,9 @@ where
                 elements.push(code_block_container.into());
             }
             MarkdownBlock::List(items) => {
-                let mut list_col = column::with_capacity(items.len()).spacing(space(0.3, zoom));
+                // GTK appends each item as its own block in `.message-content`, so
+                // the items sit the content box's 10px apart.
+                let mut list_col = column::with_capacity(items.len()).spacing(space(0.75, zoom));
                 for item in items {
                     let bullet_item = row::with_children(vec![
                         text("• ")
