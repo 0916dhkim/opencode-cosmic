@@ -1697,9 +1697,7 @@ impl Application for OpenCodeCosmic {
                 // Always allow. No reply is ever the default, so a stray Enter
                 // or Space while typing can never answer a prompt.
                 let mut actions: Vec<Element<'_, Message>> = vec![
-                    container(row::with_children(Vec::<Element<'_, Message>>::new()))
-                        .width(Length::Fill)
-                        .into(),
+                    fill_spacer(),
                     tray_text_button(
                         "Deny",
                         self.zoom,
@@ -2968,6 +2966,42 @@ fn field_input<'a>(
         .style(field_input_class())
 }
 
+/// A key cap for GTK's modal footer hints (`.keycap`-style chip).
+fn keycap<'a>(label: &'a str, zoom: f32) -> Element<'a, Message> {
+    container(
+        text(label)
+            .size(crate::metrics::em(0.72, zoom))
+            .class(cosmic::theme::Text::Color(palette::current().muted_text)),
+    )
+    .padding([
+        crate::metrics::px(1.0) as u16,
+        crate::metrics::px(4.0) as u16,
+    ])
+    .style(|_theme: &cosmic::Theme| container::Style {
+        background: Some(palette::current().composer_bg.into()),
+        border: Border {
+            color: palette::current().modal_border,
+            width: 1.0,
+            radius: 3.0.into(),
+        },
+        ..Default::default()
+    })
+    .into()
+}
+
+fn fill_spacer<'a>() -> Element<'a, Message> {
+    container(row::with_children(Vec::<Element<'a, Message>>::new()))
+        .width(Length::Fill)
+        .into()
+}
+
+fn muted_hint<'a>(label: &'a str, zoom: f32) -> Element<'a, Message> {
+    text(label)
+        .size(crate::metrics::em(0.82, zoom))
+        .class(cosmic::theme::Text::Color(palette::current().muted_text))
+        .into()
+}
+
 /// GTK's `button.settings-rail-item`: normal, hover and active token pairs.
 fn settings_rail_item_class(active: bool, radius: f32) -> cosmic::theme::Button {
     let style = move |hovered: bool| {
@@ -3539,12 +3573,15 @@ impl OpenCodeCosmic {
         &'a self,
         width: f32,
         height: f32,
-        title: &str,
+        title: Option<&str>,
         body: Element<'a, Message>,
     ) -> Element<'a, Message> {
         let radius = self.space(0.89);
-        let frame = container(
-            column::with_children(vec![
+        // GTK's sessions, new-session and rename cards carry no header; only a
+        // caller that passes a title gets the heading row and its close button.
+        let mut column_items: Vec<Element<'a, Message>> = Vec::new();
+        if let Some(title) = title {
+            column_items.push(
                 row::with_children(vec![
                     text(title.to_string())
                         .size(self.em(1.14))
@@ -3560,13 +3597,16 @@ impl OpenCodeCosmic {
                 ])
                 .align_y(Alignment::Center)
                 .into(),
-                body,
-            ])
-            .spacing(self.space(0.89))
-            // GTK's `set_size_request` is the card's outer size and iced adds
-            // padding outside a fixed width, so the padding comes off here.
-            .width(Length::Fixed(width - 2.0 * self.space(1.04)))
-            .height(Length::Fixed(height - 2.0 * self.space(1.04))),
+            );
+        }
+        column_items.push(body);
+        let frame = container(
+            column::with_children(column_items)
+                .spacing(self.space(0.89))
+                // GTK's `set_size_request` is the card's outer size and iced adds
+                // padding outside a fixed width, so the padding comes off here.
+                .width(Length::Fixed(width - 2.0 * self.space(1.04)))
+                .height(Length::Fixed(height - 2.0 * self.space(1.04))),
         )
         .padding(self.space(1.04) as u16)
         .style(move |_theme: &cosmic::Theme| container::Style {
@@ -3587,7 +3627,7 @@ impl OpenCodeCosmic {
         self.modal_frame(
             self.space(39.0),
             self.space(24.0),
-            "Sessions",
+            None,
             self.sessions_palette_body(),
         )
     }
@@ -3598,13 +3638,9 @@ impl OpenCodeCosmic {
         body_items.push(
             row::with_children(vec![
                 inline_icon(icons::search(), self.zoom).into(),
-                field_input(
-                    "Search sessions...",
-                    &self.search_query,
-                    Message::SearchInput,
-                )
-                .width(Length::Fill)
-                .into(),
+                field_input("Search tabs...", &self.search_query, Message::SearchInput)
+                    .width(Length::Fill)
+                    .into(),
             ])
             .spacing(self.space(0.44))
             .align_y(Alignment::Center)
@@ -3625,7 +3661,7 @@ impl OpenCodeCosmic {
             let radius = self.space(0.44);
             rows.push(
                 button::custom(
-                    column::with_children(vec![
+                    row::with_children(vec![
                         text(session.title.clone())
                             .size(self.em(0.96))
                             .width(Length::Fill)
@@ -3635,7 +3671,7 @@ impl OpenCodeCosmic {
                             .class(cosmic::theme::Text::Color(palette::current().muted_text))
                             .into(),
                     ])
-                    .spacing(self.space(0.15))
+                    .align_y(Alignment::Center)
                     .width(Length::Fill),
                 )
                 .padding([self.space(0.3) as u16, self.space(0.44) as u16])
@@ -3653,6 +3689,26 @@ impl OpenCodeCosmic {
                     .width(Length::Fill),
             )
             .height(Length::Fill)
+            .into(),
+        );
+
+        // GTK's picker footer: `↑↓ navigate`, `⏎ switch`, `esc close` with
+        // key caps, the last one pushed to the right edge.
+        body_items.push(
+            container(
+                row::with_children(vec![
+                    keycap("↑↓", self.zoom),
+                    muted_hint("navigate", self.zoom),
+                    keycap("⏎", self.zoom),
+                    muted_hint("switch", self.zoom),
+                    fill_spacer(),
+                    keycap("esc", self.zoom),
+                    muted_hint("close", self.zoom),
+                ])
+                .spacing(self.space(0.3))
+                .align_y(Alignment::Center),
+            )
+            .width(Length::Fill)
             .into(),
         );
 
@@ -3675,7 +3731,7 @@ impl OpenCodeCosmic {
                 .unwrap_or_else(|| project.worktree.clone());
             rows.push(
                 button::custom(
-                    column::with_children(vec![
+                    row::with_children(vec![
                         text(name)
                             .size(self.em(0.93))
                             .font(cosmic::iced::Font {
@@ -3689,7 +3745,7 @@ impl OpenCodeCosmic {
                             .class(cosmic::theme::Text::Color(palette::current().muted_text))
                             .into(),
                     ])
-                    .spacing(self.space(0.15))
+                    .align_y(Alignment::Center)
                     .width(Length::Fill),
                 )
                 .padding([self.space(0.52) as u16, self.space(0.74) as u16])
@@ -3710,9 +3766,8 @@ impl OpenCodeCosmic {
         }
 
         let search_row: Element<'_, Message> = row::with_children(vec![
-            inline_icon(icons::search(), self.zoom).into(),
             field_input(
-                "Search locations...",
+                "Search projects...",
                 &self.search_query,
                 Message::SearchInput,
             )
@@ -3735,12 +3790,7 @@ impl OpenCodeCosmic {
             .spacing(self.space(0.59))
             .height(Length::Fill);
 
-        self.modal_frame(
-            self.space(26.25),
-            self.space(23.25),
-            "New session",
-            body.into(),
-        )
+        self.modal_frame(self.space(26.25), self.space(23.25), None, body.into())
     }
 
     /// GTK's rename dialog: the title entry plus the session ID with a copy
@@ -3778,7 +3828,7 @@ impl OpenCodeCosmic {
         });
 
         let body_items: Vec<Element<'_, Message>> = vec![
-            text("Title")
+            text("Session title")
                 .size(self.em(0.82))
                 .class(cosmic::theme::Text::Color(palette::current().muted_text))
                 .into(),
@@ -3790,7 +3840,7 @@ impl OpenCodeCosmic {
             id_field.into(),
             row::with_children(vec![
                 button::text("Cancel").on_press(Message::CloseDrawer).into(),
-                button::text("Rename")
+                button::text("Save")
                     .class(accent_button_class(self.zoom))
                     .on_press(Message::ApplyRename)
                     .into(),
@@ -3803,12 +3853,7 @@ impl OpenCodeCosmic {
             .spacing(self.space(0.44))
             .height(Length::Fill);
 
-        self.modal_frame(
-            self.space(26.25),
-            self.space(23.25),
-            "Rename session",
-            body.into(),
-        )
+        self.modal_frame(self.space(26.25), self.space(23.25), None, body.into())
     }
 
     fn settings_palette(&self) -> Element<'_, Message> {
