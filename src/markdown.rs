@@ -10,15 +10,15 @@ use crate::palette;
 /// `.markdown-paragraph` are 1.45, `.markdown-heading` 1.2 and the code
 /// content inherits `.message-content`'s 1.35.
 fn body_line_height() -> cosmic::iced::core::text::LineHeight {
-    cosmic::iced::core::text::LineHeight::Relative(1.45)
+    crate::metrics::line_height(1.45)
 }
 
 fn heading_line_height() -> cosmic::iced::core::text::LineHeight {
-    cosmic::iced::core::text::LineHeight::Relative(1.2)
+    crate::metrics::line_height(1.2)
 }
 
 fn code_line_height() -> cosmic::iced::core::text::LineHeight {
-    cosmic::iced::core::text::LineHeight::Relative(1.35)
+    crate::metrics::line_height(1.35)
 }
 
 #[derive(Clone, Debug)]
@@ -263,6 +263,7 @@ where
                     let bullet_item = row::with_children(vec![
                         text("• ")
                             .size(em(0.96, zoom))
+                            .line_height(body_line_height())
                             .class(cosmic::theme::Text::Color(palette::current().muted_text))
                             .into(),
                         text(item)
@@ -274,8 +275,10 @@ where
                     list_col = list_col.push(bullet_item);
                 }
                 elements.push(
+                    // GTK's list items are blocks with `margin-start: 28`, and no
+                    // vertical padding of their own.
                     container(list_col)
-                        .padding([space(0.15, zoom) as u16, space(0.59, zoom) as u16])
+                        .padding([0, space(0.59, zoom) as u16])
                         .into(),
                 );
             }
@@ -307,5 +310,7 @@ where
         }
     }
 
-    column::with_children(elements).spacing(8).into()
+    // GTK appends every markdown block to `.message-content`, whose own
+    // spacing is 10px, so the blocks sit 10px apart.
+    column::with_children(elements).spacing(10).into()
 }

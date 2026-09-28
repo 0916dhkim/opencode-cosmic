@@ -28,6 +28,22 @@ pub fn px(value: f32) -> f32 {
     value / BASE_FONT_PX
 }
 
+/// GTK4's CSS `line-height` multiplies the font's *natural* line height
+/// (ascent + descent, 1.38em for the interface font the captures pinned), while
+/// iced's `LineHeight::Relative` multiplies the font size. Scaling GTK's
+/// factors by this makes a stylesheet line-height render at the pitch GTK gave
+/// it — without it every transcript line came out ~20% short, which is what
+/// made the port's transcript fit three more rows than GTK's.
+pub const GTK_LINE_HEIGHT_RATIO: f32 = 1.38;
+
+/// A GTK CSS `line-height` factor as an iced [`LineHeight`].
+///
+/// [`LineHeight`]: cosmic::iced::core::text::LineHeight
+#[must_use]
+pub fn line_height(factor: f32) -> cosmic::iced::core::text::LineHeight {
+    cosmic::iced::core::text::LineHeight::Relative(factor * GTK_LINE_HEIGHT_RATIO)
+}
+
 /// A 1em em-space value at zoom 1.0, for tests and default sizing.
 #[must_use]
 pub const fn em_base(factor: f32) -> u32 {

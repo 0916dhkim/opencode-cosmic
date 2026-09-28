@@ -2603,7 +2603,7 @@ fn inline_image_bytes(uri: &str) -> Option<Vec<u8>> {
 /// GTK's transcript line heights (`.message-content` 1.35, plain paragraphs
 /// 1.45, the error card's body 1.4).
 fn line_height(factor: f32) -> cosmic::iced::core::text::LineHeight {
-    cosmic::iced::core::text::LineHeight::Relative(factor)
+    crate::metrics::line_height(factor)
 }
 
 fn tab_action_class(shown: bool, radius: f32) -> cosmic::theme::Button {
