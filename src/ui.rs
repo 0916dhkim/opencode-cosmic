@@ -122,6 +122,8 @@ pub struct OpenCodeCosmic {
     /// The transcript is following the end of the run (the user has not
     /// scrolled up).
     transcript_follow: bool,
+    /// A session switch asks for the transcript to be shown from the top.
+    transcript_scroll_top: bool,
     /// The modifiers of the latest key event: the composer's editor reports an
     /// Enter action without them.
     modifiers: cosmic::iced::keyboard::Modifiers,
@@ -369,6 +371,7 @@ impl Application for OpenCodeCosmic {
             transcript_offset: 0.0,
             transcript_remaining: 0.0,
             transcript_follow: true,
+            transcript_scroll_top: false,
             modifiers: cosmic::iced::keyboard::Modifiers::default(),
             history_loading: false,
             tab_drag: None,
@@ -513,6 +516,16 @@ impl Application for OpenCodeCosmic {
                     }
                 } else if focus && self.active_drawer.is_none() {
                     tasks.push(focus_composer());
+                }
+                // A session switch lands at the top of its transcript.
+                if std::mem::take(&mut self.transcript_scroll_top) {
+                    tasks.push(cosmic::iced::widget::scrollable::scroll_to(
+                        transcript_id(),
+                        cosmic::iced::widget::scrollable::AbsoluteOffset {
+                            x: None,
+                            y: Some(0.0),
+                        },
+                    ));
                 }
                 // GTK's transcript followed the run; the scroll itself reports
                 // back through `TranscriptScrolled`.
@@ -707,6 +720,8 @@ impl Application for OpenCodeCosmic {
             }
             Message::SendPrompt(mode) => {
                 self.send_composer_prompt(mode);
+                // A prompt the reader just sent stays in view, as GTK's does.
+                self.transcript_follow = true;
                 Task::none()
             }
             Message::ComposerEnter { ctrl } => {
@@ -5418,6 +5433,11 @@ impl OpenCodeCosmic {
     fn set_active_session(&mut self, id: &str) {
         self.active_session_id = Some(id.to_string());
         self.focus_composer = true;
+        // GTK builds the transcript for a session it has just shown, so its
+        // scrolled window starts with a fresh adjustment at the top - following
+        // is for a run in the session the reader is already on.
+        self.transcript_follow = false;
+        self.transcript_scroll_top = true;
         self.unread.remove(id);
         self.persist_tabs();
         if !self.conversations.contains_key(id) {
@@ -5638,11 +5658,6 @@ impl OpenCodeCosmic {
     /// row has left the top of the transcript (the answer started), or while
     /// the reader has scrolled back up through a long one.
     fn sticky_prompt(&self) -> Option<(String, String, u64)> {
-        // GTK hid the pinned prompt while the viewport sat at the top of the
-        // transcript (`adjustment_at_top`).
-        if self.transcript_offset <= 8.0 {
-            return None;
-        }
         let conversation = self
             .active_session_id
             .as_ref()
@@ -5651,14 +5666,6 @@ impl OpenCodeCosmic {
             .messages
             .iter()
             .rposition(|message| message.role == model::Role::User && !message.in_tray())?;
-        let has_answer = conversation
-            .messages
-            .iter()
-            .skip(index + 1)
-            .any(|message| message.role == model::Role::Assistant);
-        if !(has_answer && self.transcript_offset > 8.0) && self.transcript_remaining <= 40.0 {
-            return None;
-        }
         let message = &conversation.messages[index];
         let text = message
             .segments()
@@ -5673,7 +5680,33 @@ impl OpenCodeCosmic {
             .filter(|text| !text.trim().is_empty())
             .collect::<Vec<_>>()
             .join("\n\n");
-        (!text.trim().is_empty()).then(|| (message.id.clone(), text, message.created))
+        if text.trim().is_empty() {
+            return None;
+        }
+        // GTK's `sticky_user_index` pins the row only once its realized box has
+        // passed *entirely* above the viewport, so a row that is still partly
+        // visible keeps its own tinted band. The port does not track realized
+        // row boxes, so the height comes from the same metrics the row renders
+        // with: 1.33em/1.48em padding, the 0.76em role line, the 6px gap and
+        // the body's lines at 0.96em.
+        let ratio = crate::metrics::GTK_LINE_HEIGHT_RATIO;
+        let body_lines = text.lines().count().max(1) as f32;
+        let row_height = self.space(1.33 + 1.48)
+            + 6.0 * self.zoom
+            + self.em(0.76) as f32 * ratio
+            + body_lines * (self.em(0.96) as f32 * ratio);
+        if self.transcript_offset <= row_height {
+            return None;
+        }
+        let has_answer = conversation
+            .messages
+            .iter()
+            .skip(index + 1)
+            .any(|message| message.role == model::Role::Assistant);
+        if !(has_answer && self.transcript_offset > 8.0) && self.transcript_remaining <= 40.0 {
+            return None;
+        }
+        Some((message.id.clone(), text, message.created))
     }
 
     /// Adds a pending request, replacing a known one of the same id.
