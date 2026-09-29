@@ -4,7 +4,7 @@
 # Run it only headless (never on a live desktop):
 #   CI:     xvfb-run --auto-servernum -s "-screen 0 1280x1024x24" bash tests/remote-flow-ui.sh
 #   Docker: docker run --rm --platform linux/amd64 -v "$PWD":/app -w /app \
-#             opencode-gtk-ui-test-amd64-v4:latest bash tests/remote-flow-ui.sh
+#             opencode-cosmic-ui-test-amd64-v4:latest bash tests/remote-flow-ui.sh
 # Without DISPLAY the script starts its own Xvfb; without a session bus it re-runs itself under
 # dbus-run-session. Env knobs:
 #   FLOW_BINARY=path      use a built client instead of `cargo build --locked`
@@ -195,8 +195,8 @@ address="$(<"${temporary}/address")"
 
 # v2-era state: v2 session ids plus one stale v1 id that the client must drop quietly (R2.8).
 # Field names follow src/persist.rs (PersistedState/ServerState/PersistedTab).
-mkdir -p "${temporary}/config/opencode-gtk"
-python3 - "${address}" "${temporary}/config/opencode-gtk/state.json" <<PY
+mkdir -p "${temporary}/config/opencode-cosmic"
+python3 - "${address}" "${temporary}/config/opencode-cosmic/state.json" <<PY
 import json, sys
 server, path = sys.argv[1:]
 state = {
@@ -224,7 +224,7 @@ if [[ -n "${FLOW_BINARY:-}" ]]; then
   binary="${FLOW_BINARY}"
 else
   cargo build --locked || { printf 'cargo build failed\n' >&2; exit 1; }
-  binary="${CARGO_TARGET_DIR:-target}/debug/opencode-gtk"
+  binary="${CARGO_TARGET_DIR:-target}/debug/opencode-cosmic"
 fi
 
 XDG_CONFIG_HOME="${temporary}/config" \
@@ -673,7 +673,7 @@ expect_none "no.steer-delivery" 'http and route == "session.prompt" and b.get("d
 # ------------------------------------------------------------ 11. persisted state
 
 sleep 1
-if python3 - "${temporary}/config/opencode-gtk/state.json" "${address}" "${new_session}" <<PY
+if python3 - "${temporary}/config/opencode-cosmic/state.json" "${address}" "${new_session}" <<PY
 import json, sys
 path, server, new_session = sys.argv[1:]
 state = json.load(open(path, encoding="utf-8"))

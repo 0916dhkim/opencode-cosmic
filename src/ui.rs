@@ -4857,7 +4857,7 @@ impl OpenCodeCosmic {
                         ))
                         .width(Length::Fill)
                         .into(),
-                    text(format!("opencode-gtk v{}", env!("CARGO_PKG_VERSION")))
+                    text(format!("opencode-cosmic v{}", env!("CARGO_PKG_VERSION")))
                         .size(self.em(0.74))
                         .into(),
                 ])

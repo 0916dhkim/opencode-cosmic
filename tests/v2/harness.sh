@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Isolated OpenCode 2.0.8 server harness for opencode-gtk.
+# Isolated OpenCode 2.0.8 server harness for opencode-cosmic.
 #
 #   tests/v2/harness.sh build
 #   tests/v2/harness.sh up --state DIR        # DIR must be outside the repo

@@ -546,7 +546,7 @@
         {
           "role": "tool",
           "tool_call_id": "call_mock_read",
-          "content": "Read file README.md, lines 1-3\n1: # Harness workspace\n2: \n3: A tiny seeded project used by the opencode-gtk v2 test harness."
+          "content": "Read file README.md, lines 1-3\n1: # Harness workspace\n2: \n3: A tiny seeded project used by the opencode-cosmic v2 test harness."
         },
         {
           "role": "tool",

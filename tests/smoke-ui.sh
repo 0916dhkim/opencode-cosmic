@@ -42,7 +42,7 @@ if [[ -n "${SMOKE_BINARY:-}" ]]; then
   binary="${SMOKE_BINARY}"
 else
   cargo build --locked
-  binary="${CARGO_TARGET_DIR:-target}/debug/opencode-gtk"
+  binary="${CARGO_TARGET_DIR:-target}/debug/opencode-cosmic"
 fi
 
 alive() { kill -0 "${pid}" 2>/dev/null; }

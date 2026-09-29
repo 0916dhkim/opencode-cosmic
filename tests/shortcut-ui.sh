@@ -106,7 +106,7 @@ if [[ -n "${SHORTCUT_BINARY:-}" ]]; then
   binary="${SHORTCUT_BINARY}"
 else
   cargo build --locked || { printf 'cargo build failed\n' >&2; exit 1; }
-  binary="${CARGO_TARGET_DIR:-target}/debug/opencode-gtk"
+  binary="${CARGO_TARGET_DIR:-target}/debug/opencode-cosmic"
 fi
 
 mkdir -p "${temporary}/config" "${temporary}/data" "${temporary}/cache" "${temporary}/runtime"

@@ -4,7 +4,7 @@
 # and connects when no Secret Service is running. Run it only headless (never on a live desktop);
 # it needs gnome-keyring-daemon and secret-tool, which the UI test image lacks:
 #   docker run --rm --platform linux/amd64 -v "$PWD":/app -w /app \
-#     opencode-gtk-ui-test-amd64-v4:latest bash -c 'apt-get update -qq &&
+#     opencode-cosmic-ui-test-amd64-v4:latest bash -c 'apt-get update -qq &&
 #       apt-get install -y -qq --no-install-recommends gnome-keyring libsecret-tools &&
 #       bash tests/keyring-ui.sh'
 # Without DISPLAY it starts its own Xvfb; without a session bus it re-runs itself under
@@ -25,7 +25,7 @@ timeout_s="${KEYRING_TIMEOUT:-15}"
 temporary="$(mktemp -d)"
 log="${temporary}/requests.jsonl"
 app_log="${temporary}/app.log"
-state="${temporary}/config/opencode-gtk/state.json"
+state="${temporary}/config/opencode-cosmic/state.json"
 server_pid=""
 app_pid=""
 xvfb_pid=""
@@ -159,7 +159,7 @@ open_password_field() {
 }
 
 stored_entry() {
-  secret-tool lookup service ai.opencode.Gtk.basic-auth username "${account}" 2>/dev/null
+  secret-tool lookup service ai.opencode.Cosmic.basic-auth username "${account}" 2>/dev/null
 }
 
 # ------------------------------------------------------------ environment
@@ -193,7 +193,7 @@ if [[ -n "${KEYRING_BINARY:-}" ]]; then
   binary="${KEYRING_BINARY}"
 else
   cargo build --locked || { printf 'cargo build failed\n' >&2; exit 1; }
-  binary="${CARGO_TARGET_DIR:-target}/debug/opencode-gtk"
+  binary="${CARGO_TARGET_DIR:-target}/debug/opencode-cosmic"
 fi
 
 auth_route="http and route == 'server.info'"

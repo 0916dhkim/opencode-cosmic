@@ -14,7 +14,7 @@ use crate::{
     protocol,
 };
 
-pub const SERVER_KEY: &str = "preview://opencode-gtk";
+pub const SERVER_KEY: &str = "preview://opencode-cosmic";
 
 const DIRECTORY: &str = "/repo";
 const ACTIVE_ID: &str = "ses_preview";
@@ -326,7 +326,7 @@ impl State {
             projects: vec![Project::from_info(&decode(json!({
                 "id": "prj_preview",
                 "canonical": DIRECTORY,
-                "name": "opencode-gtk",
+                "name": "opencode-cosmic",
                 "sandboxes": []
             })))],
             statuses,

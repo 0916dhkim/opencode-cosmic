@@ -15,7 +15,7 @@ if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" && -z "${GUI_IN_DBUS:-}" ]]; then
   GUI_IN_DBUS=1 exec dbus-run-session -- bash "$0" "$@"
 fi
 
-binary="${GUI_BINARY:-target/debug/opencode-gtk}"
+binary="${GUI_BINARY:-target/debug/opencode-cosmic}"
 password_file="${GUI_PASSWORD_FILE:?GUI_PASSWORD_FILE is required}"
 upstream_host="${GUI_UPSTREAM_HOST:-ocgtk-v2h-server}"
 workspace="${GUI_WORKSPACE:-/state/workspace}"
@@ -82,8 +82,8 @@ session="$(api POST /api/session "{\"location\":{\"directory\":\"${workspace}\"}
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["id"])')"
 [[ -n "${session}" ]] && pass "session.created ${session}" || { fail "session.created" "no session"; exit 1; }
 
-mkdir -p "${temporary}/config/opencode-gtk"
-python3 - "${base}" "${session}" "${workspace}" "${temporary}/config/opencode-gtk/state.json" <<'PY'
+mkdir -p "${temporary}/config/opencode-cosmic"
+python3 - "${base}" "${session}" "${workspace}" "${temporary}/config/opencode-cosmic/state.json" <<'PY'
 import json, sys
 server, session, workspace, path = sys.argv[1:]
 json.dump({

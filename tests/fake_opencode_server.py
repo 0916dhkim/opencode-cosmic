@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake OpenCode 2.0.8 server for opencode-gtk UI flow tests.
+"""Fake OpenCode 2.0.8 server for opencode-cosmic UI flow tests.
 
 Python 3 stdlib only. Response shapes, status codes, error bodies, event
 sequences and SSE framing are copied from the real captures in
@@ -147,7 +147,7 @@ HARNESS_FORM_FIELDS = [
 
 README_TEXT = (
     "Read file README.md, lines 1-3\n1: # Harness workspace\n2: \n"
-    "3: A tiny seeded project used by the opencode-gtk v2 test harness."
+    "3: A tiny seeded project used by the opencode-cosmic v2 test harness."
 )
 SUBAGENT_BACKGROUND_TEXT = (
     "The subagent is working in the background (sessionID: {child}). You will be notified "

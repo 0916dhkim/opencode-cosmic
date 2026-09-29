@@ -154,7 +154,7 @@ impl PersistedState {
 pub fn default_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("opencode-gtk")
+        .join("opencode-cosmic")
         .join("state.json")
 }
 

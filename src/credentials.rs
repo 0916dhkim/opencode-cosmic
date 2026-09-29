@@ -5,8 +5,8 @@ use keyring::{Entry, Error as KeyringError};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-const KEYRING_SERVICE: &str = "ai.opencode.Gtk.cloudflare-access";
-const PASSWORD_KEYRING_SERVICE: &str = "ai.opencode.Gtk.basic-auth";
+const KEYRING_SERVICE: &str = "ai.opencode.Cosmic.cloudflare-access";
+const PASSWORD_KEYRING_SERVICE: &str = "ai.opencode.Cosmic.basic-auth";
 const STORED_VERSION: u8 = 1;
 
 /// Where secrets live. The app uses [`SystemKeyring`]; tests inject an
